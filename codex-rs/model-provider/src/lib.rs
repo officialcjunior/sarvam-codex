@@ -3,6 +3,7 @@ mod auth;
 mod bearer_auth_provider;
 mod models_endpoint;
 mod provider;
+mod sarvam;
 
 pub use auth::auth_provider_from_auth;
 pub use auth::unauthenticated_auth_provider;
