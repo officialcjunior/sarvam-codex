@@ -24,6 +24,7 @@ use crate::auth::auth_manager_for_provider;
 use crate::auth::resolve_provider_auth;
 use crate::auth::resolve_provider_auth_for_scope;
 use crate::models_endpoint::OpenAiModelsEndpoint;
+use crate::sarvam::SarvamModelProvider;
 
 /// Optional provider-backed features that Codex may expose at runtime.
 ///
@@ -221,6 +222,8 @@ pub fn create_model_provider(
 ) -> SharedModelProvider {
     if provider_info.is_amazon_bedrock() {
         Arc::new(AmazonBedrockModelProvider::new(provider_info, auth_manager))
+    } else if provider_info.is_sarvam() {
+        Arc::new(SarvamModelProvider::new(provider_info))
     } else {
         Arc::new(ConfiguredModelProvider::new(provider_info, auth_manager))
     }
