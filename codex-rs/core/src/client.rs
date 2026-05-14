@@ -48,6 +48,8 @@ use codex_api::RequestTelemetry;
 use codex_api::ReqwestTransport;
 use codex_api::ResponseCreateWsRequest;
 use codex_api::ResponsesApiRequest;
+use codex_api::ChatCompletionsClient as ApiChatCompletionsClient;
+use codex_api::ChatCompletionsOptions as ApiChatCompletionsOptions;
 use codex_api::ResponsesClient as ApiResponsesClient;
 use codex_api::ResponsesOptions as ApiResponsesOptions;
 use codex_api::ResponsesWebsocketClient as ApiWebSocketResponsesClient;
@@ -1339,6 +1341,88 @@ impl ModelClientSession {
         }
     }
 
+    /// Streams a turn via the Chat Completions API (HTTP SSE).
+    ///
+    /// Used for providers that set `wire_api = "chat_completions"` in their
+    /// config, such as Sarvam AI.
+    #[instrument(
+        name = "model_client.stream_chat_completions_api",
+        level = "info",
+        skip_all,
+        fields(
+            model = %model_info.slug,
+            wire_api = "chat_completions",
+            transport = "chat_completions_http",
+            http.method = "POST",
+            api.path = "chat/completions",
+        )
+    )]
+    async fn stream_chat_completions_api(
+        &self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        effort: Option<ReasoningEffortConfig>,
+        summary: ReasoningSummaryConfig,
+        service_tier: Option<String>,
+        inference_trace: &InferenceTraceContext,
+    ) -> Result<ResponseStream> {
+        let client_setup = self.client.current_client_setup().await?;
+        let transport = ReqwestTransport::new(build_reqwest_client());
+        let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
+            session_telemetry,
+            AuthRequestTelemetryContext::new(
+                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+                client_setup.api_auth.as_ref(),
+                PendingUnauthorizedRetry::default(),
+            ),
+            RequestRouteTelemetry::for_endpoint("chat/completions"),
+            self.client.state.auth_env_telemetry.clone(),
+        );
+
+        let request = self.client.build_responses_request(
+            &client_setup.api_provider,
+            prompt,
+            model_info,
+            effort,
+            summary,
+            service_tier,
+        )?;
+
+        let inference_trace_attempt = inference_trace.start_attempt();
+        inference_trace_attempt.record_started(&request);
+
+        let client = ApiChatCompletionsClient::new(
+            transport,
+            client_setup.api_provider,
+            client_setup.api_auth,
+        )
+        .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+
+        let options = ApiChatCompletionsOptions::default();
+
+        match client.stream_request(request, options).await {
+            Ok(stream) => {
+                let (stream, _) = map_response_stream(
+                    stream,
+                    session_telemetry.clone(),
+                    inference_trace_attempt,
+                );
+                Ok(stream)
+            }
+            Err(err) => {
+                let response_debug_context = extract_response_debug_context_from_api_error(&err);
+                let err = map_api_error(err);
+                inference_trace_attempt.record_failed(
+                    &err,
+                    response_debug_context.request_id.as_deref(),
+                    /*output_items*/ &[],
+                );
+                Err(err)
+            }
+        }
+    }
+
     /// Streams a turn via the Responses API over WebSocket transport.
     #[allow(clippy::too_many_arguments)]
     #[instrument(
@@ -1633,6 +1717,18 @@ impl ModelClientSession {
                     summary,
                     service_tier,
                     turn_metadata_header,
+                    inference_trace,
+                )
+                .await
+            }
+            WireApi::ChatCompletions => {
+                self.stream_chat_completions_api(
+                    prompt,
+                    model_info,
+                    session_telemetry,
+                    effort,
+                    summary,
+                    service_tier,
                     inference_trace,
                 )
                 .await
