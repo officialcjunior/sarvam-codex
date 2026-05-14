@@ -41,6 +41,10 @@ pub const AMAZON_BEDROCK_GPT_5_5_MODEL_ID: &str = "openai.gpt-5.5";
 pub const AMAZON_BEDROCK_GPT_5_4_MODEL_ID: &str = "openai.gpt-5.4";
 pub const AMAZON_BEDROCK_DEFAULT_BASE_URL: &str =
     "https://bedrock-mantle.us-east-1.api.aws/openai/v1";
+pub const SARVAM_PROVIDER_ID: &str = "sarvam";
+pub const SARVAM_PROVIDER_NAME: &str = "Sarvam AI";
+const SARVAM_BASE_URL: &str = "https://api.sarvam.ai/v1";
+const SARVAM_ENV_KEY: &str = "SARVAM_API_KEY";
 const AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER: &str = "x-amzn-mantle-client-agent";
 const AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_VALUE: &str = "codex";
 const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"responses\"` in your provider config.\nMore info: https://github.com/openai/codex/discussions/7782";
@@ -406,6 +410,34 @@ impl ModelProviderInfo {
         self.name == AMAZON_BEDROCK_PROVIDER_NAME
     }
 
+    pub fn is_sarvam(&self) -> bool {
+        self.name == SARVAM_PROVIDER_NAME
+    }
+
+    pub fn create_sarvam_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: SARVAM_PROVIDER_NAME.into(),
+            base_url: Some(SARVAM_BASE_URL.into()),
+            env_key: Some(SARVAM_ENV_KEY.into()),
+            env_key_instructions: Some(
+                "Get your API key from https://dashboard.sarvam.ai".into(),
+            ),
+            experimental_bearer_token: None,
+            auth: None,
+            aws: None,
+            wire_api: WireApi::ChatCompletions,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        }
+    }
+
     pub fn supports_remote_compaction(&self) -> bool {
         self.is_openai() || is_azure_responses_provider(&self.name, self.base_url.as_deref())
     }
@@ -444,6 +476,7 @@ pub fn built_in_model_providers(
             LMSTUDIO_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_LMSTUDIO_PORT, WireApi::Responses),
         ),
+        (SARVAM_PROVIDER_ID, P::create_sarvam_provider()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
