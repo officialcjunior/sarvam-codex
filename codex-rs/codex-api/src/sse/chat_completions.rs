@@ -2,6 +2,11 @@
 
 use crate::chat_completions::ChunkUsage;
 use crate::chat_completions::ChatCompletionsChunk;
+use crate::chat_completions::synth_apply_patch_from_edit_file;
+use crate::chat_completions::synth_apply_patch_from_write_file;
+use crate::chat_completions::synth_shell_command_from_glob;
+use crate::chat_completions::synth_shell_command_from_grep;
+use crate::chat_completions::synth_shell_command_from_read_file;
 use crate::common::ResponseEvent;
 use crate::common::ResponseStream;
 use crate::error::ApiError;
@@ -294,11 +299,70 @@ pub async fn process_chat_completions_sse(
 
     // Emit assembled tool call items.
     for (_, buf) in tool_calls_buf {
-        // apply_patch arrives as a function tool call (name + JSON arguments),
-        // but the apply_patch handler expects ToolPayload::Custom { input }.
-        // Convert it to CustomToolCall so the existing handler receives the
-        // patch string directly without any core changes.
-        let item = if buf.name == "apply_patch" {
+        // The apply_patch handler expects ToolPayload::Custom { input } with a
+        // raw apply_patch envelope. Chat Completions providers cannot emit a
+        // "custom" tool call directly — they speak function calls only. We
+        // expose two simpler function tools (edit_file, write_file) and
+        // synthesise the apply_patch envelope here, so the core handler is
+        // unchanged regardless of provider.
+        let item = if buf.name == "edit_file" || buf.name == "write_file" {
+            let synth = if buf.name == "edit_file" {
+                synth_apply_patch_from_edit_file(&buf.args)
+            } else {
+                synth_apply_patch_from_write_file(&buf.args)
+            };
+            match synth {
+                Ok(patch) => ResponseItem::CustomToolCall {
+                    id: Some(buf.id.clone()),
+                    status: None,
+                    call_id: buf.id,
+                    name: "apply_patch".to_string(),
+                    input: patch,
+                },
+                Err(reason) => {
+                    // Surface the error to the model as a function-call result
+                    // so it can retry with corrected arguments.
+                    debug!("rejecting {} tool_call: {reason}", buf.name);
+                    ResponseItem::FunctionCall {
+                        id: None,
+                        name: buf.name,
+                        namespace: None,
+                        arguments: buf.args,
+                        call_id: buf.id,
+                    }
+                }
+            }
+        } else if buf.name == "read_file" || buf.name == "glob" || buf.name == "grep" {
+            // Typed read/search tools forwarded through the existing
+            // shell_command handler. Synthesise the shell invocation here so
+            // the core handler is unchanged.
+            let synth = match buf.name.as_str() {
+                "read_file" => synth_shell_command_from_read_file(&buf.args),
+                "glob" => synth_shell_command_from_glob(&buf.args),
+                _ => synth_shell_command_from_grep(&buf.args),
+            };
+            match synth {
+                Ok(shell_args) => ResponseItem::FunctionCall {
+                    id: None,
+                    name: "shell_command".to_string(),
+                    namespace: None,
+                    arguments: shell_args,
+                    call_id: buf.id,
+                },
+                Err(reason) => {
+                    debug!("rejecting {} tool_call: {reason}", buf.name);
+                    ResponseItem::FunctionCall {
+                        id: None,
+                        name: buf.name,
+                        namespace: None,
+                        arguments: buf.args,
+                        call_id: buf.id,
+                    }
+                }
+            }
+        } else if buf.name == "apply_patch" {
+            // Legacy path: some providers may still emit apply_patch directly
+            // (e.g. if the prompt convinced them to). Accept it.
             let patch = serde_json::from_str::<serde_json::Value>(&buf.args)
                 .ok()
                 .and_then(|v| v.get("patch").and_then(|p| p.as_str()).map(str::to_string))
