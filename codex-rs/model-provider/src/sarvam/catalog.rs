@@ -1,8 +1,14 @@
-use codex_models_manager::model_info::BASE_INSTRUCTIONS;
-
-/// Sarvam-specific prompt prefix, compiled in from prompt.md at build time.
-/// Edit model-provider/src/sarvam/prompt.md to change it — no Rust changes needed.
-const SARVAM_PROMPT_PREFIX: &str = include_str!("prompt.md");
+/// Sarvam-specific system prompt, compiled in from prompt.md at build time.
+///
+/// This is a self-contained prompt — we deliberately do NOT concatenate the
+/// shared `BASE_INSTRUCTIONS` (which is OpenAI/Responses-API-oriented and was
+/// causing Sarvam to mis-format tool calls, e.g. wrapping `apply_patch` inside
+/// a `shell {"command":["apply_patch", ...]}` envelope instead of calling the
+/// `apply_patch` function tool directly).
+///
+/// Edit model-provider/src/sarvam/prompt.md to change Sarvam's behavior — no
+/// Rust changes needed.
+const SARVAM_PROMPT: &str = include_str!("sarvam-prompt.md");
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ConfigShellToolType;
@@ -86,7 +92,7 @@ fn sarvam_model(
         service_tiers: Vec::new(),
         availability_nux: None,
         upgrade: None,
-        base_instructions: format!("{SARVAM_PROMPT_PREFIX}{BASE_INSTRUCTIONS}"),
+        base_instructions: SARVAM_PROMPT.to_string(),
         model_messages: None,
         // Chat Completions has no reasoning_summary field.
         supports_reasoning_summaries: false,
