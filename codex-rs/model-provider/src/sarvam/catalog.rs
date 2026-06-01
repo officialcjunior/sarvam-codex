@@ -117,6 +117,8 @@ fn sarvam_model(
         experimental_supported_tools: Vec::new(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        default_service_tier: None,
+        tool_mode: None,
     }
 }
 

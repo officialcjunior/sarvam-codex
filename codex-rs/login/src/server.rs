@@ -818,7 +818,7 @@ pub(crate) async fn persist_tokens_async(
         }
         let auth = AuthDotJson {
             auth_mode: Some(AuthMode::Chatgpt),
-            openai_api_key: api_key,
+            sarvam_api_key: api_key,
             tokens: Some(tokens),
             last_refresh: Some(Utc::now()),
             agent_identity: None,
@@ -1301,7 +1301,7 @@ mod tests {
     fn chatgpt_auth(access_token: &str, refresh_token: &str, account_id: &str) -> AuthDotJson {
         AuthDotJson {
             auth_mode: Some(AuthMode::Chatgpt),
-            openai_api_key: None,
+            sarvam_api_key: None,
             tokens: Some(TokenData {
                 id_token: parse_chatgpt_jwt_claims(&jwt_for_account(account_id))
                     .expect("test JWT should parse"),
