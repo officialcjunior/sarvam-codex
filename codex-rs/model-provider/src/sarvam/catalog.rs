@@ -105,8 +105,7 @@ fn sarvam_model(
         // Provider capabilities disable web search; this field controls format only.
         web_search_tool_type: WebSearchToolType::Text,
         truncation_policy: TruncationPolicyConfig::tokens(/*limit*/ 10_000),
-        // Our translation layer sends parallel_tool_calls: false.
-        supports_parallel_tool_calls: false,
+        supports_parallel_tool_calls: true,
         // Chat Completions content must be plain strings — no image attachments.
         supports_image_detail_original: false,
         input_modalities: vec![InputModality::Text],
@@ -117,6 +116,8 @@ fn sarvam_model(
         experimental_supported_tools: Vec::new(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        default_service_tier: None,
+        tool_mode: None,
     }
 }
 
@@ -161,11 +162,11 @@ mod tests {
     }
 
     #[test]
-    fn models_are_text_only_no_parallel_tool_calls() {
+    fn models_are_text_only_with_parallel_tool_calls() {
         let catalog = static_model_catalog();
         for model in &catalog.models {
             assert_eq!(model.input_modalities, vec![InputModality::Text]);
-            assert!(!model.supports_parallel_tool_calls);
+            assert!(model.supports_parallel_tool_calls);
             assert!(!model.supports_image_detail_original);
         }
     }
