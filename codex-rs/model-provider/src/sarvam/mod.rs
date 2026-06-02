@@ -23,11 +23,12 @@ use catalog::static_model_catalog;
 #[derive(Clone, Debug)]
 pub(crate) struct SarvamModelProvider {
     info: ModelProviderInfo,
+    auth_manager: Option<Arc<AuthManager>>,
 }
 
 impl SarvamModelProvider {
-    pub(crate) fn new(info: ModelProviderInfo) -> Self {
-        Self { info }
+    pub(crate) fn new(info: ModelProviderInfo, auth_manager: Option<Arc<AuthManager>>) -> Self {
+        Self { info, auth_manager }
     }
 }
 
@@ -47,17 +48,33 @@ impl ModelProvider for SarvamModelProvider {
     }
 
     fn auth_manager(&self) -> Option<Arc<AuthManager>> {
-        None
+        self.auth_manager.clone()
     }
 
     async fn auth(&self) -> Option<CodexAuth> {
-        None
+        self.auth_manager.as_ref().and_then(|am| am.auth_cached())
     }
 
     fn account_state(&self) -> ProviderAccountResult {
+        let account = if self.info.requires_openai_auth {
+            self.auth_manager
+                .as_ref()
+                .and_then(|auth_manager| {
+                    let auth = auth_manager.auth_cached()?;
+                    Some(auth)
+                })
+                .map(|auth| match &auth {
+                    CodexAuth::ApiKey(_) => Ok(codex_protocol::account::ProviderAccount::ApiKey),
+                    _ => Ok(codex_protocol::account::ProviderAccount::ApiKey),
+                })
+                .transpose()?
+        } else {
+            None
+        };
+
         Ok(ProviderAccountState {
-            account: None,
-            requires_openai_auth: false,
+            account,
+            requires_openai_auth: self.info.requires_openai_auth,
         })
     }
 

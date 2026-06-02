@@ -118,6 +118,7 @@ fn sarvam_model(
         supports_search_tool: false,
         default_service_tier: None,
         tool_mode: None,
+        auto_review_model_override: None,
     }
 }
 
