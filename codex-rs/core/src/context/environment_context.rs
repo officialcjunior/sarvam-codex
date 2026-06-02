@@ -23,6 +23,8 @@ pub(crate) struct EnvironmentContext {
     pub(crate) network: Option<NetworkContext>,
     pub(crate) filesystem: Option<FileSystemContext>,
     pub(crate) subagents: Option<String>,
+    pub(crate) platform: Option<String>,
+    pub(crate) is_git_repo: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -342,6 +344,8 @@ impl EnvironmentContext {
             network,
             filesystem: None,
             subagents,
+            platform: None,
+            is_git_repo: false,
         }
     }
 
@@ -360,6 +364,8 @@ impl EnvironmentContext {
             network,
             filesystem,
             subagents,
+            platform: None,
+            is_git_repo: false,
         }
     }
 
@@ -373,6 +379,8 @@ impl EnvironmentContext {
             && self.network == other.network
             && self.filesystem == other.filesystem
             && self.subagents == other.subagents
+            && self.platform == other.platform
+            && self.is_git_repo == other.is_git_repo
     }
 
     pub(crate) fn diff_from_turn_context_item(
@@ -418,6 +426,7 @@ impl EnvironmentContext {
     }
 
     pub(crate) fn from_turn_context(turn_context: &TurnContext, shell: &Shell) -> Self {
+        let workspace_roots = turn_context.config.effective_workspace_roots();
         let mut context = Self::new(
             EnvironmentContextEnvironment::from_turn_environments(
                 &turn_context.environments.turn_environments,
@@ -430,8 +439,13 @@ impl EnvironmentContext {
         );
         context.filesystem = Some(FileSystemContext::from_permission_profile(
             &turn_context.permission_profile,
-            &turn_context.config.effective_workspace_roots(),
+            &workspace_roots,
         ));
+        context.platform = Some(std::env::consts::OS.to_string());
+        context.is_git_repo = workspace_roots
+            .first()
+            .map(|root| root.join(".git").exists())
+            .unwrap_or(false);
         context
     }
 
@@ -547,6 +561,13 @@ impl ContextualUserFragment for EnvironmentContext {
                     environment.cwd.to_string_lossy()
                 ));
                 lines.push(format!("  <shell>{}</shell>", environment.shell));
+                if let Some(platform) = &self.platform {
+                    lines.push(format!("  <platform>{platform}</platform>"));
+                }
+                lines.push(format!(
+                    "  <is_git_repo>{}</is_git_repo>",
+                    self.is_git_repo
+                ));
             }
             EnvironmentContextEnvironments::Multiple(environments) => {
                 lines.push("  <environments>".to_string());
