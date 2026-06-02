@@ -85,7 +85,7 @@ codex --sandbox workspace-write
 codex --sandbox danger-full-access
 ```
 
-In `workspace-write`, Codex also includes `~/.codex/memories` in its writable roots so memory maintenance does not require an extra approval.
+In `workspace-write`, Codex also includes `~/.sarvam-codex/memories` in its writable roots so memory maintenance does not require an extra approval.
 
 ## Code Organization
 
