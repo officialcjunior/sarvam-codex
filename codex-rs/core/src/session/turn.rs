@@ -3,6 +3,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+const MAX_TOOL_CALL_ROUNDS: usize = 20;
+const MAX_STEPS_MESSAGE: &str = "CRITICAL: You have reached the maximum number of \
+tool-call rounds allowed for this turn. Do NOT make any further tool calls. \
+You MUST now provide a complete text response summarizing the work you have done so far \
+and answering the user's original question based on what you have found.";
+
 use crate::SkillInjections;
 use crate::build_skill_injections;
 use crate::client::ModelClientSession;
@@ -178,6 +184,8 @@ pub(crate) async fn run_turn(
         return None;
     }
 
+    let mut tool_call_rounds: usize = 0;
+
     sess.merge_connector_selection(explicitly_enabled_connectors.clone())
         .await;
     sess.set_previous_turn_settings(Some(PreviousTurnSettings {
@@ -234,11 +242,22 @@ pub(crate) async fn run_turn(
         }
 
         // Construct the input that we will send to the model.
-        let sampling_request_input: Vec<ResponseItem> = {
+        let mut sampling_request_input: Vec<ResponseItem> = {
             sess.clone_history()
                 .await
                 .for_prompt(&turn_context.model_info.input_modalities)
         };
+
+        if tool_call_rounds >= MAX_TOOL_CALL_ROUNDS {
+            sampling_request_input.push(ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: MAX_STEPS_MESSAGE.to_string(),
+                }],
+                phase: None,
+            });
+        }
 
         let window_id = sess.services.model_client.current_window_id();
         let turn_metadata_header = turn_context
@@ -366,6 +385,7 @@ pub(crate) async fn run_turn(
                     }
                     break;
                 }
+                tool_call_rounds += 1;
                 continue;
             }
             Err(CodexErr::TurnAborted) => {
