@@ -88,7 +88,7 @@ fn resolved_auth_mode(auth_dot_json: &AuthDotJson) -> AuthMode {
     if let Some(mode) = auth_dot_json.auth_mode {
         return mode;
     }
-    if auth_dot_json.openai_api_key.is_some() {
+    if auth_dot_json.sarvam_api_key.is_some() {
         return AuthMode::ApiKey;
     }
     AuthMode::Chatgpt

@@ -255,7 +255,7 @@ impl CodexAuth {
     ) -> std::io::Result<Self> {
         let auth_mode = auth_dot_json.resolved_mode();
         if auth_mode == AuthMode::ApiKey {
-            let Some(api_key) = auth_dot_json.openai_api_key.as_deref() else {
+            let Some(api_key) = auth_dot_json.sarvam_api_key.as_deref() else {
                 return Err(std::io::Error::other("API key auth is missing a key."));
             };
             return Ok(Self::from_api_key(api_key));
@@ -701,7 +701,7 @@ impl CodexAuth {
     pub fn create_dummy_chatgpt_auth_for_testing() -> Self {
         let auth_dot_json = AuthDotJson {
             auth_mode: Some(AuthMode::Chatgpt),
-            openai_api_key: None,
+            sarvam_api_key: None,
             tokens: Some(TokenData {
                 id_token: Default::default(),
                 access_token: "Access Token".to_string(),
@@ -833,12 +833,12 @@ fn persist_agent_identity_record(
     Ok(())
 }
 
-pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
+pub const SARVAM_API_KEY_ENV_VAR: &str = "SARVAM_API_KEY";
 pub const CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
 pub const CODEX_ACCESS_TOKEN_ENV_VAR: &str = "CODEX_ACCESS_TOKEN";
 
-pub fn read_openai_api_key_from_env() -> Option<String> {
-    env::var(OPENAI_API_KEY_ENV_VAR)
+pub fn read_sarvam_api_key_from_env() -> Option<String> {
+    env::var(SARVAM_API_KEY_ENV_VAR)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -910,7 +910,7 @@ pub fn login_with_api_key(
 ) -> std::io::Result<()> {
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(AuthMode::ApiKey),
-        openai_api_key: Some(api_key.to_string()),
+        sarvam_api_key: Some(api_key.to_string()),
         tokens: None,
         last_refresh: None,
         agent_identity: None,
@@ -943,7 +943,7 @@ pub async fn login_with_access_token(
                 // Infer PAT auth from the credential field so older Codex builds can still
                 // deserialize auth.json after a rollback.
                 auth_mode: None,
-                openai_api_key: None,
+                sarvam_api_key: None,
                 tokens: None,
                 last_refresh: None,
                 agent_identity: None,
@@ -959,7 +959,7 @@ pub async fn login_with_access_token(
             verified_record_from_jwt(jwt, &base_url, auth_route_config).await?;
             AuthDotJson {
                 auth_mode: Some(AuthMode::AgentIdentity),
-                openai_api_key: None,
+                sarvam_api_key: None,
                 tokens: None,
                 last_refresh: None,
                 agent_identity: Some(AgentIdentityStorage::Jwt(jwt.to_string())),
@@ -1479,7 +1479,7 @@ impl AuthDotJson {
 
         Ok(Self {
             auth_mode: Some(AuthMode::ChatgptAuthTokens),
-            openai_api_key: None,
+            sarvam_api_key: None,
             tokens: Some(tokens),
             last_refresh: Some(Utc::now()),
             agent_identity: None,
@@ -1498,7 +1498,7 @@ impl AuthDotJson {
         if self.bedrock_api_key.is_some() {
             return AuthMode::BedrockApiKey;
         }
-        if self.openai_api_key.is_some() {
+        if self.sarvam_api_key.is_some() {
             return AuthMode::ApiKey;
         }
         AuthMode::Chatgpt

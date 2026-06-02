@@ -48,7 +48,7 @@ use codex_login::AuthManager;
 use codex_login::CODEX_ACCESS_TOKEN_ENV_VAR;
 use codex_login::CODEX_API_KEY_ENV_VAR;
 use codex_login::CodexAuth;
-use codex_login::OPENAI_API_KEY_ENV_VAR;
+use codex_login::SARVAM_API_KEY_ENV_VAR;
 use codex_login::default_client::build_reqwest_client;
 use codex_login::default_client::default_headers;
 use codex_login::load_auth_dot_json;
@@ -1182,7 +1182,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
     details.push(format!("auth file: {}", auth_path.display()));
 
     let env_auth_vars = [
-        OPENAI_API_KEY_ENV_VAR,
+        SARVAM_API_KEY_ENV_VAR,
         CODEX_API_KEY_ENV_VAR,
         CODEX_ACCESS_TOKEN_ENV_VAR,
     ]
@@ -1212,7 +1212,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
     ) {
         Ok(Some(auth)) => {
             details.push(format!("stored auth mode: {}", stored_auth_mode(&auth)));
-            details.push(format!("stored API key: {}", auth.openai_api_key.is_some()));
+            details.push(format!("stored API key: {}", auth.sarvam_api_key.is_some()));
             details.push(format!("stored ChatGPT tokens: {}", auth.tokens.is_some()));
             details.push(format!(
                 "stored agent identity: {}",
@@ -1350,7 +1350,7 @@ fn stored_auth_mode_value(auth: &AuthDotJson) -> AuthMode {
         AuthMode::PersonalAccessToken
     } else if auth.bedrock_api_key.is_some() {
         AuthMode::BedrockApiKey
-    } else if auth.openai_api_key.is_some() {
+    } else if auth.sarvam_api_key.is_some() {
         AuthMode::ApiKey
     } else {
         AuthMode::Chatgpt
@@ -1365,11 +1365,11 @@ fn stored_auth_issues(
     match stored_auth_mode_value(auth) {
         AuthMode::ApiKey => {
             let stored_key_present = auth
-                .openai_api_key
+                .sarvam_api_key
                 .as_deref()
                 .is_some_and(|key| !key.trim().is_empty());
             let env_key_present =
-                env_var_present(OPENAI_API_KEY_ENV_VAR) || env_var_present(CODEX_API_KEY_ENV_VAR);
+                env_var_present(SARVAM_API_KEY_ENV_VAR) || env_var_present(CODEX_API_KEY_ENV_VAR);
             if !stored_key_present && !env_key_present {
                 issues.push("API key auth is missing an API key");
             }
@@ -2609,7 +2609,7 @@ fn provider_auth_reachability_mode_from_auth(
     if !requires_openai_auth {
         return ProviderAuthReachabilityMode::NotRequired;
     }
-    if env_var_present(OPENAI_API_KEY_ENV_VAR) || env_var_present(CODEX_API_KEY_ENV_VAR) {
+    if env_var_present(SARVAM_API_KEY_ENV_VAR) || env_var_present(CODEX_API_KEY_ENV_VAR) {
         return ProviderAuthReachabilityMode::ApiKey;
     }
     if env_var_present(CODEX_ACCESS_TOKEN_ENV_VAR) {
@@ -3314,7 +3314,7 @@ mod tests {
                 .detail(
                     "optional reachability failed: remote: https://user:pass@example.com/mcp?x=abc (connect failed)",
                 )
-                .detail("OPENAI_API_KEY: sk-live-secret")
+                .detail("SARVAM_API_KEY: sk-live-secret")
                 .detail("duplicate: one")
                 .detail("duplicate: two")
                 .detail("freeform note")
@@ -3370,7 +3370,7 @@ mod tests {
         );
         assert_eq!(json["checks"]["mcp.config"]["id"], "mcp.config");
         assert_eq!(
-            json["checks"]["mcp.config"]["details"]["OPENAI_API_KEY"],
+            json["checks"]["mcp.config"]["details"]["SARVAM_API_KEY"],
             "<redacted>"
         );
         assert_eq!(
@@ -3537,7 +3537,7 @@ mod tests {
     fn stored_auth_validation_rejects_missing_api_key() {
         let auth = AuthDotJson {
             auth_mode: Some(AuthMode::ApiKey),
-            openai_api_key: None,
+            sarvam_api_key: None,
             tokens: None,
             last_refresh: None,
             agent_identity: None,
@@ -3549,14 +3549,14 @@ mod tests {
             stored_auth_issues(&auth, |_| false),
             vec!["API key auth is missing an API key"]
         );
-        assert!(stored_auth_issues(&auth, |name| name == OPENAI_API_KEY_ENV_VAR).is_empty());
+        assert!(stored_auth_issues(&auth, |name| name == SARVAM_API_KEY_ENV_VAR).is_empty());
     }
 
     #[test]
     fn stored_auth_validation_rejects_missing_chatgpt_tokens() {
         let auth = AuthDotJson {
             auth_mode: None,
-            openai_api_key: None,
+            sarvam_api_key: None,
             tokens: None,
             last_refresh: None,
             agent_identity: None,
@@ -3577,7 +3577,7 @@ mod tests {
     fn stored_auth_validation_handles_personal_access_token() {
         let mut auth = AuthDotJson {
             auth_mode: None,
-            openai_api_key: None,
+            sarvam_api_key: None,
             tokens: None,
             last_refresh: None,
             agent_identity: None,
@@ -3600,7 +3600,7 @@ mod tests {
     fn provider_reachability_mode_uses_api_key_auth() {
         let api_key_auth = AuthDotJson {
             auth_mode: Some(AuthMode::ApiKey),
-            openai_api_key: Some("sk-test".to_string()),
+            sarvam_api_key: Some("sk-test".to_string()),
             tokens: None,
             last_refresh: None,
             agent_identity: None,
@@ -3619,7 +3619,7 @@ mod tests {
         assert_eq!(
             provider_auth_reachability_mode_from_auth(
                 /*requires_openai_auth*/ true,
-                |name| name == OPENAI_API_KEY_ENV_VAR,
+                |name| name == SARVAM_API_KEY_ENV_VAR,
                 /*stored_auth*/ None,
             ),
             ProviderAuthReachabilityMode::ApiKey
