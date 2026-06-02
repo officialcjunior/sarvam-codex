@@ -418,10 +418,8 @@ impl ModelProviderInfo {
         ModelProviderInfo {
             name: SARVAM_PROVIDER_NAME.into(),
             base_url: Some(SARVAM_BASE_URL.into()),
-            env_key: Some(SARVAM_ENV_KEY.into()),
-            env_key_instructions: Some(
-                "Get your API key from https://dashboard.sarvam.ai".into(),
-            ),
+            env_key: None,
+            env_key_instructions: None,
             experimental_bearer_token: None,
             auth: None,
             aws: None,
@@ -433,7 +431,7 @@ impl ModelProviderInfo {
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
-            requires_openai_auth: false,
+            requires_openai_auth: true,
             supports_websockets: false,
         }
     }

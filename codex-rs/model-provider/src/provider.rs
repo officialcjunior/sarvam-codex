@@ -153,7 +153,7 @@ pub fn create_model_provider(
     if provider_info.is_amazon_bedrock() {
         Arc::new(AmazonBedrockModelProvider::new(provider_info))
     } else if provider_info.is_sarvam() {
-        Arc::new(SarvamModelProvider::new(provider_info))
+        Arc::new(SarvamModelProvider::new(provider_info, auth_manager))
     } else {
         Arc::new(ConfiguredModelProvider::new(provider_info, auth_manager))
     }
