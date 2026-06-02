@@ -1,0 +1,57 @@
+
+Claude, see SARVAM_INTEGRATION_SUMMARY.md if you'd like, but the context is: we're forking OpenAI's codex to support Sarvam AI's models on this branch.
+
+But clearly, opencode (another coding agent) still outperforms us for the same prompt/task. I've attached the session logs which you can see. Sarvam-codex simply stops midway whereas opencode gives us an honest summary.
+
+We need to find out why that's the case. I assumed the system prompt and available tools are all it matters. 1) check if the available tools
+and prompts are comparable and similar. Maybe we can even try with the same prompt opencode uses.
+
+I have opencode's source code in here and here's some useful paths and files you can refer:
+/Users/aswinc/Downloads/projects/codex/opencode/packages/opencode/src/tool
+/Users/aswinc/Downloads/projects/codex/opencode/packages/opencode/src/session/prompt.ts
+/Users/aswinc/Downloads/projects/codex/opencode/packages/opencode/src/session/prompt/gpt.txt
+
+Our prompt is at /Users/aswinc/Downloads/projects/codex/codex-rs/model-provider/src/sarvam/sarvam-prompt.md 
+and it's read at /Users/aswinc/Downloads/projects/codex/codex-rs/model-provider/src/sarvam/catalog.rs
+
+
+---
+  1. ~/.codex/config.toml — User-level config
+  model_provider = "sarvam"
+  model = "sarvam-105b"
+  2. ~/.codex/auth.json — API key storage (created automatically on first TUI login)
+    - After user selects "Provide your own API key" and enters the Sarvam API key, this file is auto-generated
+    - Can be copied between machines if you want to skip the TUI login on each install
+
+  ---
+
+
+---
+
+## Setting Up Your Sarvam API Key
+
+Codex stores your Sarvam API credentials securely in `~/.sarvam-codex/auth.json`.
+
+### Option 1: TUI Setup (Recommended)
+
+On first run, Codex will prompt you to authenticate:
+
+```shell
+codex
+```
+
+Select **"Provide your own API key"** and paste your Sarvam API key. It will be automatically saved to `~/.sarvam-codex/auth.json`.
+
+### Option 2: Environment Variable (Optional)
+
+You can also pre-populate the TUI form by setting the `SARVAM_API_KEY` environment variable:
+
+```bash
+export SARVAM_API_KEY="sk_..."
+codex
+```
+
+This is useful for CI/automation, but the TUI will still prompt you on first run. Once you submit a key through the TUI, it persists to `auth.json` and is used automatically on subsequent runs.
+
+That's it — no `config.toml` needed. Sarvam is the default provider and `sarvam-105b` is selected automatically.
+---
