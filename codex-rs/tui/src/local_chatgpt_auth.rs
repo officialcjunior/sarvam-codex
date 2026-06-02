@@ -21,7 +21,7 @@ pub(crate) fn load_local_chatgpt_auth(
     let auth = load_auth_dot_json(codex_home, auth_credentials_store_mode)
         .map_err(|err| format!("failed to load local auth: {err}"))?
         .ok_or_else(|| "no local auth available".to_string())?;
-    if matches!(auth.auth_mode, Some(AuthMode::ApiKey)) || auth.openai_api_key.is_some() {
+    if matches!(auth.auth_mode, Some(AuthMode::ApiKey)) || auth.sarvam_api_key.is_some() {
         return Err("local auth is not a ChatGPT login".to_string());
     }
 
@@ -99,7 +99,7 @@ mod tests {
         let access_token = fake_jwt("user@example.com", "workspace-1", plan_type);
         let auth = AuthDotJson {
             auth_mode: Some(AuthMode::Chatgpt),
-            openai_api_key: None,
+            sarvam_api_key: None,
             tokens: Some(TokenData {
                 id_token: codex_login::token_data::parse_chatgpt_jwt_claims(&id_token)
                     .expect("id token should parse"),
@@ -152,7 +152,7 @@ mod tests {
             codex_home.path(),
             &AuthDotJson {
                 auth_mode: Some(AuthMode::ApiKey),
-                openai_api_key: Some("sk-test".to_string()),
+                sarvam_api_key: Some("sk-test".to_string()),
                 tokens: None,
                 last_refresh: None,
                 agent_identity: None,
