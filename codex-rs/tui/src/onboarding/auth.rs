@@ -304,15 +304,20 @@ impl AuthModeWidget {
     }
 
     fn is_api_login_allowed(&self) -> bool {
-        !matches!(self.forced_login_method, Some(ForcedLoginMethod::Chatgpt))
+        match self.forced_login_method {
+            Some(ForcedLoginMethod::Api) => false,
+            Some(ForcedLoginMethod::Chatgpt) => false,
+            None => true,
+        }
     }
 
     fn is_chatgpt_login_allowed(&self) -> bool {
-        !matches!(self.forced_login_method, Some(ForcedLoginMethod::Api))
+        false
     }
 
     fn displayed_sign_in_options(&self) -> Vec<SignInOption> {
-        let mut options = vec![SignInOption::ChatGpt];
+        
+        let mut options = Vec::new();
         if self.is_chatgpt_login_allowed() {
             options.push(SignInOption::DeviceCode);
         }
@@ -387,7 +392,7 @@ impl AuthModeWidget {
 
     fn render_pick_mode(&self, area: Rect, buf: &mut Buffer) {
         let mut lines: Vec<Line> = vec![
-            Line::from(vec![
+            /*Line::from(vec![
                 "  ".into(),
                 "Sign in with ChatGPT to use Codex as part of your paid plan".into(),
             ]),
@@ -395,7 +400,7 @@ impl AuthModeWidget {
                 "  ".into(),
                 "or connect an API key for usage-based billing".into(),
             ]),
-            "".into(),
+            "".into(), */
         ];
 
         let create_mode_item = |idx: usize,
@@ -436,22 +441,6 @@ impl AuthModeWidget {
 
         for (idx, option) in self.displayed_sign_in_options().into_iter().enumerate() {
             match option {
-                SignInOption::ChatGpt => {
-                    lines.extend(create_mode_item(
-                        idx,
-                        option,
-                        "Sign in with ChatGPT",
-                        chatgpt_description,
-                    ));
-                }
-                SignInOption::DeviceCode => {
-                    lines.extend(create_mode_item(
-                        idx,
-                        option,
-                        "Sign in with Device Code",
-                        device_code_description,
-                    ));
-                }
                 SignInOption::ApiKey => {
                     lines.extend(create_mode_item(
                         idx,
@@ -459,6 +448,15 @@ impl AuthModeWidget {
                         "Provide your own API key",
                         "Pay for what you use",
                     ));
+                }                
+                SignInOption::ChatGpt => {
+                    //pass
+                    
+
+                }
+                SignInOption::DeviceCode => {
+                    // pass
+
                 }
             }
             lines.push("".into());
@@ -624,7 +622,7 @@ impl AuthModeWidget {
         let mut intro_lines: Vec<Line> = vec![
             Line::from(vec![
                 "> ".into(),
-                "Use your own OpenAI API key for usage-based billing".bold(),
+                "Use your own Sarvam API key from https://dashboard.sarvam.ai/key-management".bold(),
             ]),
             "".into(),
             "  Paste or type your API key below. It will be stored locally in auth.json.".into(),
@@ -968,6 +966,7 @@ impl WidgetRef for AuthModeWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let sign_in_state = self.sign_in_state.read().unwrap();
         match &*sign_in_state {
+            
             SignInState::PickMode => {
                 self.render_pick_mode(area, buf);
             }
