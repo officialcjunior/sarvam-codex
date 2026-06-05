@@ -138,7 +138,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_mode != 'promote_signed' }}
     needs: tag-check
     name: Build - ${{ matrix.runner }} - ${{ matrix.target }} - ${{ matrix.bundle }}
-    runs-on: ${{ matrix.runs_on || matrix.runner }}
+    runs-on: ${{ matrix.runner }}
     # Release builds can take a long time, so leave some headroom to avoid
     # having to restart the full workflow due to a timeout.
     timeout-minutes: 90
@@ -154,59 +154,36 @@ jobs:
       # submodules through SecureTransport/libgit2, especially libwebrtc's
       # libyuv submodule from chromium.googlesource.com.
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_BUILD_JOBS: "2"
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15-xlarge
+          - runner: macos-15
             target: aarch64-apple-darwin
             bundle: primary
             artifact_name: aarch64-apple-darwin
-            binaries: "codex codex-responses-api-proxy"
-            build_dmg: "true"
-          - runner: macos-15-xlarge
-            target: aarch64-apple-darwin
-            bundle: app-server
-            artifact_name: aarch64-apple-darwin-app-server
-            binaries: "codex-app-server"
+            binaries: "sarvam-codex"
             build_dmg: "false"
-          - runner: macos-15-xlarge
+          - runner: macos-15
             target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
-            binaries: "codex codex-responses-api-proxy"
-            build_dmg: "true"
-          - runner: macos-15-xlarge
-            target: x86_64-apple-darwin
-            bundle: app-server
-            artifact_name: x86_64-apple-darwin-app-server
-            binaries: "codex-app-server"
+            binaries: "sarvam-codex"
             build_dmg: "false"
           # Release artifacts intentionally ship MUSL-linked Linux binaries.
-          - runner: codex-linux-x64-xl
+          - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
             bundle: primary
             artifact_name: x86_64-unknown-linux-musl
-            binaries: "codex codex-responses-api-proxy bwrap"
+            binaries: "sarvam-codex"
             build_dmg: "false"
-          - runner: codex-linux-x64-xl
-            target: x86_64-unknown-linux-musl
-            bundle: app-server
-            artifact_name: x86_64-unknown-linux-musl-app-server
-            binaries: "codex-app-server"
-            build_dmg: "false"
-          - runner: codex-linux-arm64
+          - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             bundle: primary
             artifact_name: aarch64-unknown-linux-musl
-            binaries: "codex codex-responses-api-proxy bwrap"
-            build_dmg: "false"
-          - runner: codex-linux-arm64
-            target: aarch64-unknown-linux-musl
-            bundle: app-server
-            artifact_name: aarch64-unknown-linux-musl-app-server
-            binaries: "codex-app-server"
+            binaries: "sarvam-codex"
             build_dmg: "false"
 
     steps:
@@ -293,23 +270,6 @@ jobs:
         with:
           target: ${{ matrix.target }}
 
-      - if: ${{ contains(matrix.target, 'linux') }}
-        name: Build bwrap and export digest
-        shell: bash
-        run: |
-          set -euo pipefail
-          target="${{ matrix.target }}"
-          cargo build --target "$target" --release --timings --bin bwrap
-
-          bwrap_path="target/${target}/release/bwrap"
-          if [[ ! -f "$bwrap_path" ]]; then
-            echo "bwrap binary ${bwrap_path} not found"
-            exit 1
-          fi
-
-          digest="$(sha256sum "$bwrap_path" | awk '{print $1}')"
-          echo "CODEX_BWRAP_SHA256=${digest}" >> "$GITHUB_ENV"
-          echo "Built bwrap ${bwrap_path} with sha256:${digest}"
 
       - name: Cargo build
         shell: bash
@@ -373,7 +333,6 @@ jobs:
           binaries: ${{ matrix.binaries }}
 
       - name: Stage artifacts
-        if: ${{ runner.os != 'macOS' }}
         shell: bash
         run: |
           dest="dist/${{ matrix.target }}"
@@ -387,88 +346,12 @@ jobs:
             fi
           done
 
-          if [[ "${{ matrix.target }}" == *linux* && "${{ matrix.bundle }}" == "primary" ]]; then
-            bundle_root="${RUNNER_TEMP}/codex-${{ matrix.target }}-bundle"
-            rm -rf "$bundle_root"
-            mkdir -p "$bundle_root/codex-resources"
-            cp "$dest/codex-${{ matrix.target }}" "$bundle_root/codex"
-            cp "$dest/bwrap-${{ matrix.target }}" "$bundle_root/codex-resources/bwrap"
-            chmod 0755 "$bundle_root/codex" "$bundle_root/codex-resources/bwrap"
-            tar -C "$bundle_root" -cf - codex codex-resources/bwrap |
-              zstd -T0 -19 -o "$dest/codex-${{ matrix.target }}-bundle.tar.zst"
-          fi
 
           if [[ "${{ matrix.build_dmg }}" == "true" ]]; then
             cp target/${{ matrix.target }}/release/codex-${{ matrix.target }}.dmg "$dest/codex-${{ matrix.target }}.dmg"
           fi
 
-      - name: Build Codex package archive
-        if: ${{ runner.os != 'macOS' }}
-        shell: bash
-        env:
-          TARGET: ${{ matrix.target }}
-          BUNDLE: ${{ matrix.bundle }}
-        run: |
-          set -euo pipefail
-          bash "${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh" \
-            --target "$TARGET" \
-            --bundle "$BUNDLE" \
-            --entrypoint-dir "target/${TARGET}/release" \
-            --archive-dir "dist/${TARGET}"
-
-      - name: Build Python runtime wheel
-        if: ${{ matrix.bundle == 'primary' && runner.os != 'macOS' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          case "${{ matrix.target }}" in
-            aarch64-apple-darwin)
-              platform_tag="macosx_11_0_arm64"
-              ;;
-            x86_64-apple-darwin)
-              platform_tag="macosx_10_9_x86_64"
-              ;;
-            aarch64-unknown-linux-musl)
-              platform_tag="manylinux_2_17_aarch64"
-              ;;
-            x86_64-unknown-linux-musl)
-              platform_tag="manylinux_2_17_x86_64"
-              ;;
-            *)
-              echo "No Python runtime wheel platform tag for ${{ matrix.target }}"
-              exit 1
-              ;;
-          esac
-
-          python3 -m venv "${RUNNER_TEMP}/python-runtime-build-venv"
-          # Do not install into the runner's system Python; macOS runners mark
-          # the Homebrew Python as externally managed under PEP 668.
-          "${RUNNER_TEMP}/python-runtime-build-venv/bin/python" -m pip install build
-
-          stage_dir="${RUNNER_TEMP}/openai-codex-cli-bin-${{ matrix.target }}"
-          wheel_dir="${GITHUB_WORKSPACE}/python-runtime-dist/${{ matrix.target }}"
-          stage_runtime_args=(
-            "${GITHUB_WORKSPACE}/sdk/python/scripts/update_sdk_artifacts.py"
-            stage-runtime
-            "$stage_dir"
-            "dist/${{ matrix.target }}/codex-package-${{ matrix.target }}.tar.gz"
-            --codex-version "${GITHUB_REF_NAME}"
-            --platform-tag "$platform_tag"
-          )
-          python3 "${stage_runtime_args[@]}"
-          "${RUNNER_TEMP}/python-runtime-build-venv/bin/python" -m build --wheel --outdir "$wheel_dir" "$stage_dir"
-
-      - name: Upload Python runtime wheel
-        if: ${{ matrix.bundle == 'primary' && runner.os != 'macOS' }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: python-runtime-wheel-${{ matrix.target }}
-          path: python-runtime-dist/${{ matrix.target }}/*.whl
-          if-no-files-found: error
-
       - name: Compress artifacts
-        if: ${{ runner.os != 'macOS' }}
         shell: bash
         run: |
           # Path that contains the uncompressed binaries for the current
@@ -505,7 +388,6 @@ jobs:
           done
 
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        if: ${{ runner.os != 'macOS' }}
         with:
           name: ${{ matrix.artifact_name }}
           # Upload the per-binary .zst files, .tar.gz equivalents, and any
@@ -514,7 +396,7 @@ jobs:
             codex-rs/dist/${{ matrix.target }}/*
 
   sign-macos-binaries:
-    if: ${{ github.event_name != 'workflow_dispatch' }}
+    if: false
     needs: build
     name: Sign macOS binaries - ${{ matrix.target }} - ${{ matrix.bundle }}
     runs-on: ubuntu-latest
@@ -634,7 +516,7 @@ jobs:
           if-no-files-found: warn
 
   package-macos:
-    if: ${{ github.event_name != 'workflow_dispatch' }}
+    if: false
     needs: sign-macos-binaries
     name: Package macOS artifacts - ${{ matrix.target }} - ${{ matrix.bundle }}
     runs-on: macos-15-xlarge
@@ -824,7 +706,7 @@ jobs:
           if-no-files-found: error
 
   sign-macos-dmg:
-    if: ${{ github.event_name != 'workflow_dispatch' }}
+    if: false
     needs: package-macos
     name: Sign macOS DMG - ${{ matrix.target }}
     runs-on: ubuntu-latest
@@ -921,7 +803,7 @@ jobs:
           if-no-files-found: warn
 
   finalize-macos:
-    if: ${{ github.event_name != 'workflow_dispatch' }}
+    if: false
     needs:
       - package-macos
       - sign-macos-dmg
@@ -1346,8 +1228,6 @@ jobs:
     needs:
       - tag-check
       - build
-      - finalize-macos
-      - stage-signed-macos
       - build-windows
       - argument-comment-lint-release-assets
       - zsh-release-assets
@@ -1355,37 +1235,10 @@ jobs:
       ${{
         always() &&
         needs.tag-check.result == 'success' &&
-        (
-          (
-            github.event_name == 'workflow_dispatch' &&
-            inputs.release_mode == 'promote_signed' &&
-            needs.stage-signed-macos.result == 'success' &&
-            needs.build.result == 'skipped' &&
-            needs.finalize-macos.result == 'skipped' &&
-            needs.build-windows.result == 'skipped' &&
-            needs.argument-comment-lint-release-assets.result == 'skipped' &&
-            needs.zsh-release-assets.result == 'skipped'
-          ) ||
-          (
-            (github.event_name != 'workflow_dispatch' || inputs.release_mode != 'promote_signed') &&
-            needs.build.result == 'success' &&
-            (
-              (
-                github.event_name == 'workflow_dispatch' &&
-                inputs.release_mode == 'build_unsigned' &&
-                needs.finalize-macos.result == 'skipped'
-              ) ||
-              (
-                github.event_name != 'workflow_dispatch' &&
-                needs.finalize-macos.result == 'success'
-              )
-            ) &&
-            needs.stage-signed-macos.result == 'skipped' &&
-            needs.build-windows.result == 'success' &&
-            needs.argument-comment-lint-release-assets.result == 'success' &&
-            needs.zsh-release-assets.result == 'success'
-          )
-        )
+        needs.build.result == 'success' &&
+        needs.build-windows.result == 'success' &&
+        needs.argument-comment-lint-release-assets.result == 'success' &&
+        needs.zsh-release-assets.result == 'success'
       }}
     name: release
     runs-on: ubuntu-latest
@@ -1394,7 +1247,7 @@ jobs:
       actions: read
     env:
       RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_mode || 'signed' }}
-      SIGN_MACOS: ${{ github.event_name != 'workflow_dispatch' || inputs.release_mode == 'promote_signed' }}
+      SIGN_MACOS: 'false'
       SIGNED_MACOS_ASSET: ${{ inputs.signed_macos_asset }}
       UNSIGNED_RUN_ID: ${{ inputs.unsigned_run_id }}
     outputs:
@@ -1538,7 +1391,7 @@ jobs:
         run: ls -R dist/
 
       - name: Prune artifacts excluded from unsigned macOS release
-        if: ${{ env.SIGN_MACOS == 'false' }}
+        if: false
         run: |
           find dist -mindepth 1 -maxdepth 1 -type d \
             ! -name '*-apple-darwin*-unsigned' \
@@ -1564,9 +1417,7 @@ jobs:
           rm -rf dist/*-apple-darwin*-signed-dmg
           rm -rf dist/*-apple-darwin*-binary-signing-verification
           rm -rf dist/*-apple-darwin*-dmg-signing-verification
-          if [[ "${SIGN_MACOS}" == "true" ]]; then
-            rm -rf dist/*-apple-darwin*-unsigned
-          fi
+          rm -rf dist/*-apple-darwin*-unsigned
           # cargo-timing.html appears under multiple target-specific directories.
           # If included in files: dist/**, release upload races on duplicate
           # asset names and can fail with 404s.
@@ -1576,24 +1427,8 @@ jobs:
           ls -R dist/
 
       - name: Add Codex package checksum manifest
-        run: |
-          set -euo pipefail
-
-          manifest="dist/codex-package_SHA256SUMS"
-          tmp_manifest="$(mktemp)"
-          find dist -type f \
-            \( -name 'codex-package-*.tar.gz' -o -name 'codex-app-server-package-*.tar.gz' \) \
-            -print |
-            sort |
-            while IFS= read -r archive; do
-              sha256sum "$archive" |
-                awk -v name="$(basename "$archive")" '{ print $1 "  " name }'
-            done > "$tmp_manifest"
-
-          if [[ ! -s "$tmp_manifest" ]]; then
-            echo "No Codex package archives found for checksum manifest"
-            exit 1
-          fi
+        if: false
+        run: echo "skipped"
 
           mv "$tmp_manifest" "$manifest"
           cat "$manifest"
@@ -1679,7 +1514,7 @@ jobs:
           body_path: ${{ steps.release_notes.outputs.path }}
           files: dist/**
           overwrite_files: true
-          make_latest: ${{ env.SIGN_MACOS == 'true' && !contains(steps.release_name.outputs.name, '-') }}
+          make_latest: ${{ !contains(steps.release_name.outputs.name, '-') }}
           # Mark as prerelease only when the version has a suffix after x.y.z
           # (e.g. -alpha, -beta). Otherwise publish a normal release.
           prerelease: ${{ contains(steps.release_name.outputs.name, '-') }}

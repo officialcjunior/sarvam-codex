@@ -119,6 +119,8 @@ fn sarvam_model(
         default_service_tier: None,
         tool_mode: None,
         auto_review_model_override: None,
+        multi_agent_version: None,
+        use_responses_lite: false,
     }
 }
 

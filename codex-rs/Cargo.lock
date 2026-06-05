@@ -2510,7 +2510,7 @@ dependencies = [
 
 [[package]]
 name = "codex-context-fragments"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "codex-protocol",
  "codex-utils-string",
@@ -3738,7 +3738,7 @@ dependencies = [
 
 [[package]]
 name = "codex-skills-extension"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "async-trait",
  "codex-core",
