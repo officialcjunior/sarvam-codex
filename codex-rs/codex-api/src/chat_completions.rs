@@ -190,6 +190,7 @@ pub fn responses_to_chat_completions_request(
             }
             ReasoningEffort::Medium => "medium".to_string(),
             ReasoningEffort::High | ReasoningEffort::XHigh => "high".to_string(),
+            ReasoningEffort::Custom(s) => s.clone(),
         });
 
     ChatCompletionsRequest {
