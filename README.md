@@ -9,5 +9,19 @@
 
 ### Installing and running Sarvam Codex CLI
 
-Right now, you have to build sarvam-codex from source. Go to codex-rs and and run `cargo build --bin sarvam codex`. We're working
-on executables.
+You can go to the latest GitHub Release and download the appropriate binary for your platform.
+
+Each GitHub Release contains many executables, but in practice, you likely want one of these:
+
+* Windows
+
+  - x86_64: sarvam-codex-x86_64-pc-windows-msvc.exe 
+  - aarch64: sarvam-codex-aarch64-pc-windows-msvc.exe
+* Linux
+  - x86_64: sarvam-codex-x86_64-unknown-linux-musl.tar.gz
+  - aarch64: sarvam-codex-aarch64-unknown-linux-musl.tar.gz
+* macOS
+  - x86_64: sarvam-codex-x86_64-apple-darwin.tar.gz
+  - aarch64: sarvam-codex-aarch64-apple-darwin.tar.gz
+
+Or you can just build it yourself to be on bleeding edge.
