@@ -193,14 +193,12 @@ image generation disabled via `ProviderCapabilities`.
 
 ### Sarvam-specific system prompt
 
-`codex-rs/model-provider/src/sarvam/prompt.md` is prepended to the
-shared `BASE_INSTRUCTIONS` via `include_str!`. It tells the model to
-call tools via the API's native `tool_calls` mechanism rather than
-emitting XML-style `<function-calls>` tags or inline JSON tool-call
-text. Reason it exists: `sarvam-105b` was mimicking the Freeform
-`apply_patch` JSON example shown in the shared `prompt.md` and
-emitting tool calls as text content, which the SSE processor then
-rendered as visible bullets instead of executing.
+`codex-rs/model-provider/src/sarvam/sarvam-prompt.md` is a standalone prompt compiled in via `include_str!`. It tells the model to:
+- Call tools via the API's native `tool_calls` mechanism (not XML tags or inline JSON text).
+- Use `update_plan` to both create and track plans (`update_plan` is the single planning tool — there is no separate `create_plan`).
+- Apply per-tool usage discipline (no repeated reads, batch parallel calls, stop after 3 fruitless searches, etc.).
+
+The prompt is self-contained and does **not** concatenate the shared `BASE_INSTRUCTIONS` — that shared prompt is OpenAI/Responses-API-oriented and was causing `sarvam-105b` to emit tool calls as text content (e.g. wrapping `apply_patch` inside a shell command) instead of using the function-calling API.
 
 ---
 
@@ -293,9 +291,16 @@ codex-api/src/chat_completions.rs
     • type="custom", name="apply_patch" → synthesised function tool with patch: string parameter
     • all others       → dropped
 
+        ↓ (after rewrap)
+  has_shell check: if "shell_command" OR "exec_command" is in the tool list →
+    synth_simple_read_search_tools() adds: read_file, glob, grep
+    (SSE processor converts these back to shell_command dispatches at call time)
+
         ↓
 POST .../chat/completions  →  "tools": [...]
 ```
+
+**Note on UnifiedExec mode:** On macOS (and all non-Windows platforms), `conpty_supported()` returns `true`, so the `UnifiedExec` feature flag — when enabled — makes `exec_command`+`write_stdin` the model-visible shell tools and demotes `shell_command` to dispatch-only (hidden from the model but still routable). The `has_shell` check was extended to also match `exec_command` so that `read_file`/`glob`/`grep` are synthesised correctly in both shell modes.
 
 ### apply_patch round-trip (inbound)
 

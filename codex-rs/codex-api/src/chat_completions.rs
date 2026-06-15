@@ -162,16 +162,24 @@ pub fn responses_to_chat_completions_request(
         .flat_map(rewrap_tool_for_chat_completions)
         .collect();
 
-    // If `shell_command` is in the toolset, also advertise dedicated
-    // `read_file` / `glob` / `grep` tools. These are typed wrappers that the
-    // SSE processor rewrites into `shell_command` calls — modelled on opencode,
-    // which sees noticeably better tool-use reliability on smaller models when
-    // search and read are typed tools instead of free-form shell commands.
+    // If `shell_command` or `exec_command` is in the toolset, also advertise
+    // dedicated `read_file` / `glob` / `grep` tools. These are typed wrappers
+    // that the SSE processor rewrites into `shell_command` calls — modelled on
+    // opencode, which sees noticeably better tool-use reliability on smaller
+    // models when search and read are typed tools instead of free-form shell
+    // commands.
+    //
+    // Note: when the UnifiedExec feature is active (always true on macOS since
+    // conpty_supported() returns true on non-Windows), `exec_command` is the
+    // model-visible shell tool and `shell_command` becomes dispatch-only
+    // (hidden from the model but still routable). The SSE processor converts
+    // read_file/glob/grep calls into `shell_command` invocations, which the
+    // router dispatches to the dispatch-only ShellCommandHandler correctly.
     let has_shell = tools.iter().any(|t| {
         t.get("function")
             .and_then(|f| f.get("name"))
             .and_then(Value::as_str)
-            == Some("shell_command")
+            .is_some_and(|name| name == "shell_command" || name == "exec_command")
     });
     if has_shell {
         tools.extend(synth_simple_read_search_tools());
