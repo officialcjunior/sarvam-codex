@@ -29,6 +29,11 @@ pub struct ChatCompletionsRequest {
     /// Maps to Sarvam's `reasoning_effort` field ("low" | "medium" | "high").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Explicit output token limit. Serialized as `null` (no limit) by
+    /// default — Sarvam's built-in default of 2048 truncates large tool-call
+    /// arguments (e.g. write_file with HTML/CSS content) and causes the agent
+    /// to loop on broken JSON. Callers may override with Some(n) if needed.
+    pub max_tokens: Option<u32>,
 }
 
 /// A single message in the `messages` array.
@@ -202,6 +207,10 @@ pub fn responses_to_chat_completions_request(
         stream: req.stream,
         stream_options,
         reasoning_effort,
+        // Send null so Sarvam uses its own maximum rather than the 2048
+        // default, which truncates large tool-call arguments (e.g. write_file
+        // with HTML/CSS content) and causes the agent to loop on broken JSON.
+        max_tokens: None,
     }
 }
 
