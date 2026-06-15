@@ -15,6 +15,7 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use std::sync::Arc;
+use tracing::debug;
 use tracing::instrument;
 
 pub struct ChatCompletionsClient<T: HttpTransport> {
@@ -63,6 +64,10 @@ impl<T: HttpTransport> ChatCompletionsClient<T> {
         options: ChatCompletionsOptions,
     ) -> Result<ResponseStream, ApiError> {
         let cc_request = responses_to_chat_completions_request(&request);
+        debug!(
+            request = %serde_json::to_string_pretty(&cc_request).unwrap_or_default(),
+            "→ chat/completions outbound request"
+        );
         let body = serde_json::to_value(&cc_request).map_err(|e| {
             ApiError::Stream(format!("failed to encode chat completions request: {e}"))
         })?;
