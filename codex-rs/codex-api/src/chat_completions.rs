@@ -114,6 +114,37 @@ pub(crate) struct ChunkUsage {
 
 // ── Translation ──────────────────────────────────────────────────────────────
 
+/// Merge consecutive assistant messages into a single message.
+/// This handles the case where an assistant response with text and a tool call
+/// is stored as two separate ResponseItems in session history (one for the text,
+/// one for the tool call). Chat Completions expects these to be a single assistant
+/// message with both content and tool_calls fields.
+fn merge_consecutive_assistant_messages(messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
+    let mut result: Vec<ChatMessage> = Vec::new();
+    for msg in messages {
+        if msg.role == "assistant" {
+            if let Some(last) = result.last_mut() {
+                if last.role == "assistant" {
+                    // Merge content: prefer non-empty, or concatenate if both present.
+                    if last.content.is_empty() {
+                        last.content = msg.content;
+                    } else if !msg.content.is_empty() {
+                        last.content.push('\n');
+                        last.content.push_str(&msg.content);
+                    }
+                    // Merge tool_calls arrays.
+                    if let Some(tcs) = msg.tool_calls {
+                        last.tool_calls.get_or_insert_with(Vec::new).extend(tcs);
+                    }
+                    continue;
+                }
+            }
+        }
+        result.push(msg);
+    }
+    result
+}
+
 /// Convert a `ResponsesApiRequest` into a `ChatCompletionsRequest`.
 ///
 /// - `instructions` becomes a leading `system` message.
@@ -130,23 +161,47 @@ pub fn responses_to_chat_completions_request(
     req: &ResponsesApiRequest,
 ) -> ChatCompletionsRequest {
     let mut messages: Vec<ChatMessage> = Vec::new();
+    let mut system_parts: Vec<String> = Vec::new();
 
-    // System prompt
+    // Collect system content from both instructions and developer-role input items.
     if !req.instructions.is_empty() {
+        system_parts.push(req.instructions.clone());
+    }
+
+    // Extract developer-role messages from input (these should be consolidated into system).
+    for item in &req.input {
+        if let ResponseItem::Message { role, content, .. } = item {
+            if role == "developer" {
+                system_parts.push(flatten_content_items(content));
+            }
+        }
+    }
+
+    // Emit exactly one consolidated system message.
+    if !system_parts.is_empty() {
         messages.push(ChatMessage {
             role: "system".to_string(),
-            content: req.instructions.clone(),
+            content: system_parts.join("\n\n"),
             tool_call_id: None,
             tool_calls: None,
         });
     }
 
-    // Conversation history
+    // Conversation history (skip developer-role items — they're now in the system message).
     for item in &req.input {
+        if let ResponseItem::Message { role, .. } = item {
+            if role == "developer" {
+                continue;
+            }
+        }
         if let Some(msg) = response_item_to_chat_message(item) {
             messages.push(msg);
         }
     }
+
+    // Merge consecutive assistant messages to avoid malformed requests
+    // (Chat Completions expects text and tool_calls to be in the same message).
+    messages = merge_consecutive_assistant_messages(messages);
 
     // Re-wrap function tools from Responses format to Chat Completions format.
     // Responses: {"type":"function","name":...,"description":...,"parameters":...}
