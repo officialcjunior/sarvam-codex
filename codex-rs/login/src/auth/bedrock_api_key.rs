@@ -26,7 +26,7 @@ pub fn login_with_bedrock_api_key(
 ) -> std::io::Result<()> {
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(AuthMode::BedrockApiKey),
-        openai_api_key: None,
+        sarvam_api_key: None,
         tokens: None,
         last_refresh: None,
         agent_identity: None,

@@ -1531,6 +1531,7 @@ impl ModelClientSession {
         effort: Option<ReasoningEffortConfig>,
         summary: ReasoningSummaryConfig,
         service_tier: Option<String>,
+        responses_metadata: &CodexResponsesMetadata,
         inference_trace: &InferenceTraceContext,
     ) -> Result<ResponseStream> {
         let client_setup = self.client.current_client_setup().await?;
@@ -1540,6 +1541,7 @@ impl ModelClientSession {
             AuthRequestTelemetryContext::new(
                 client_setup.auth.as_ref().map(CodexAuth::auth_mode),
                 client_setup.api_auth.as_ref(),
+                client_setup.agent_identity_telemetry.clone(),
                 PendingUnauthorizedRetry::default(),
             ),
             RequestRouteTelemetry::for_endpoint("chat/completions"),
@@ -1553,6 +1555,7 @@ impl ModelClientSession {
             effort,
             summary,
             service_tier,
+            responses_metadata,
         )?;
 
         let inference_trace_attempt = inference_trace.start_attempt();
@@ -1573,12 +1576,13 @@ impl ModelClientSession {
                     stream,
                     session_telemetry.clone(),
                     inference_trace_attempt,
+                    Arc::clone(&self.client.state.provider),
                 );
                 Ok(stream)
             }
             Err(err) => {
                 let response_debug_context = extract_response_debug_context_from_api_error(&err);
-                let err = map_api_error(err);
+                let err = self.client.state.provider.map_api_error(err);
                 inference_trace_attempt.record_failed(
                     &err,
                     response_debug_context.request_id.as_deref(),
@@ -1913,6 +1917,7 @@ impl ModelClientSession {
                     effort,
                     summary,
                     service_tier,
+                    responses_metadata,
                     inference_trace,
                 )
                 .await
