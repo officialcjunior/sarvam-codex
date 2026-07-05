@@ -4,6 +4,7 @@ use crate::chat_completions::ChunkUsage;
 use crate::chat_completions::ChatCompletionsChunk;
 use crate::chat_completions::synth_apply_patch_from_edit_file;
 use crate::chat_completions::synth_apply_patch_from_write_file;
+use crate::chat_completions::unwrap_apply_patch_envelope;
 use crate::chat_completions::synth_shell_command_from_glob;
 use crate::chat_completions::synth_shell_command_from_grep;
 use crate::chat_completions::synth_shell_command_from_read_file;
@@ -369,12 +370,16 @@ pub async fn process_chat_completions_sse(
                 }
             }
         } else if buf.name == "apply_patch" {
-            // Legacy path: some providers may still emit apply_patch directly
-            // (e.g. if the prompt convinced them to). Accept it.
-            let patch = serde_json::from_str::<serde_json::Value>(&buf.args)
-                .ok()
-                .and_then(|v| v.get("patch").and_then(|p| p.as_str()).map(str::to_string))
-                .unwrap_or(buf.args);
+            // The model directly emitted an apply_patch call. It is *supposed*
+            // to send `{"patch": "*** Begin Patch..."}`, but it frequently uses
+            // the internal `{"input": ...}` key instead and — once an error has
+            // been echoed into history — nests the envelope inside further
+            // wrappers. Peel every recognised wrapper down to the bare envelope
+            // so core's `parse_patch` sees a valid `*** Begin Patch` first line
+            // instead of a JSON object. Passing the raw args straight through
+            // (the old behaviour) is what let a single stray `{"input":…}` call
+            // spiral into ever-deeper nesting.
+            let patch = unwrap_apply_patch_envelope(&buf.args);
             ResponseItem::CustomToolCall {
                 id: Some(buf.id.clone()),
                 status: None,

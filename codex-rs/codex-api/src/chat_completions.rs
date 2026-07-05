@@ -333,12 +333,17 @@ match item {
                     name: name.clone(),
                     // Custom tool inputs are raw payloads (e.g. the apply_patch
                     // envelope), not JSON. Chat Completions requires `arguments`
-                    // to be a valid JSON-encoded string, so wrap the payload as
-                    // {"input": <text>}. Sarvam only schema-validates the
-                    // outbound tool definitions; for echoed history it just
-                    // needs the field to parse as JSON.
+                    // to be a valid JSON-encoded string, so wrap the payload in
+                    // an object. Echo it back under the same `patch` key the
+                    // schema advertises and the SSE parser reads, and de-nest
+                    // first so we never re-wrap an already-wrapped payload:
+                    // re-wrapping is what previously escalated a single stray
+                    // call into the nested-`{"input":…}` spiral the model then
+                    // imitated turn after turn.
                     arguments: serde_json::to_string(
-                        &serde_json::json!({ "input": input }),
+                        &serde_json::json!({
+                            "patch": unwrap_apply_patch_envelope(input),
+                        }),
                     )
                     .unwrap_or_else(|_| "{}".to_string()),
                 },
@@ -431,7 +436,9 @@ fn rewrap_tool_for_chat_completions(tool: &Value) -> Vec<Value> {
     if tool_type == "custom" {
         let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("");
         if name == "apply_patch" {
-            return synth_simple_edit_tools();
+            let mut tools = synth_simple_edit_tools();
+            tools.push(synth_apply_patch_function_tool());
+            return tools;
         }
         return Vec::new();
     }
@@ -518,6 +525,76 @@ fn synth_simple_edit_tools() -> Vec<Value> {
             }
         }),
     ]
+}
+
+/// An apply_patch envelope always begins with this marker on its first line.
+pub(crate) const APPLY_PATCH_ENVELOPE_PREFIX: &str = "*** Begin Patch";
+
+/// Peel a tool-call `arguments` payload down to the bare apply_patch envelope.
+///
+/// The schema advertises `{"patch": "*** Begin Patch..."}`, but the model does
+/// not always cooperate:
+/// - it sometimes uses the internal `{"input": ...}` key instead of `patch`,
+/// - and once an error has been echoed back into history, it starts nesting the
+///   envelope inside further `{"patch": ...}` / `{"input": ...}` wrappers,
+///   which snowballs across turns into a runaway spiral of deeply nested
+///   objects (each rejected patch teaches it to nest one level deeper).
+///
+/// We unwrap every recognised layer until we reach the bare envelope (or run
+/// out of layers), so any of those shapes resolves to a patch whose first line
+/// is `*** Begin Patch` and core's `parse_patch` accepts it. Returning the last
+/// unwrapped value even when it is *not* a valid envelope preserves the old
+/// behaviour of surfacing a parse error to the model rather than silently
+/// dropping the call.
+pub(crate) fn unwrap_apply_patch_envelope(arguments: &str) -> String {
+    let mut current = arguments.trim().to_string();
+    // Bound the loop; a legitimate patch never nests, so a handful of
+    // iterations is plenty and guards against pathological input.
+    for _ in 0..8 {
+        if current.starts_with(APPLY_PATCH_ENVELOPE_PREFIX) {
+            return current;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(&current) else {
+            break;
+        };
+        let inner = value
+            .get("patch")
+            .or_else(|| value.get("input"))
+            .and_then(Value::as_str);
+        match inner {
+            Some(inner) => current = inner.trim().to_string(),
+            None => break,
+        }
+    }
+    current
+}
+
+/// The real `apply_patch` tool, advertised alongside `edit_file`/`write_file`
+/// as a plain JSON-schema function tool (Chat Completions has no freeform/
+/// grammar tool type, unlike the Responses API — see
+/// `core/src/tools/handlers/apply_patch_spec.rs`). The model must still
+/// JSON-encode the multi-line patch envelope as a string, which keeps the
+/// escaping fragility that motivated `edit_file`/`write_file` in the first
+/// place; this is declared so the model uses the real schema instead of
+/// hallucinating an undeclared `apply_patch` call.
+fn synth_apply_patch_function_tool() -> Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "apply_patch",
+            "description": "Apply a patch to one or more files using the apply_patch envelope format: a `*** Begin Patch` / `*** End Patch` block containing `*** Add File:`, `*** Update File:`, or `*** Delete File:` sections with `+`/`-` context lines. Prefer `edit_file`/`write_file` for single-file edits; use this only for multi-file or multi-hunk patches.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patch": {
+                        "type": "string",
+                        "description": "The full apply_patch envelope, from `*** Begin Patch` to `*** End Patch`."
+                    }
+                },
+                "required": ["patch"]
+            }
+        }
+    })
 }
 
 /// Build an apply_patch payload from `edit_file` arguments.
@@ -1110,7 +1187,55 @@ mod tests {
         // Must parse as JSON.
         let parsed: serde_json::Value = serde_json::from_str(args)
             .expect("arguments must be valid JSON");
-        assert_eq!(parsed["input"].as_str().unwrap(), patch);
+        // Echoed under the same `patch` key the schema advertises and the SSE
+        // parser reads, so the model sees a consistent shape in its own history.
+        assert_eq!(parsed["patch"].as_str().unwrap(), patch.trim());
+    }
+
+    #[test]
+    fn custom_tool_call_replay_does_not_renest_wrapped_input() {
+        // A previously-rejected call whose stored `input` is itself a wrapped
+        // JSON object must be de-nested before replay, otherwise each turn adds
+        // another layer and the model imitates the escalating nesting.
+        let patch = "*** Begin Patch\n*** Update File: x\n@@\n-foo\n+bar\n*** End Patch\n";
+        let wrapped = format!("{{\"input\": {}}}", serde_json::to_string(patch).unwrap());
+        let req = make_request(
+            "",
+            vec![ResponseItem::CustomToolCall {
+                id: None,
+                status: None,
+                call_id: "call_1".to_string(),
+                name: "apply_patch".to_string(),
+                input: wrapped,
+            }],
+        );
+        let cc = responses_to_chat_completions_request(&req);
+        let tool_calls = cc.messages[0].tool_calls.as_ref().unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tool_calls[0].function.arguments).unwrap();
+        assert_eq!(parsed["patch"].as_str().unwrap(), patch.trim());
+    }
+
+    #[test]
+    fn unwrap_apply_patch_envelope_peels_wrappers() {
+        let patch = "*** Begin Patch\n*** Update File: x\n@@\n-foo\n+bar\n*** End Patch";
+        // Bare envelope is returned unchanged.
+        assert_eq!(unwrap_apply_patch_envelope(patch), patch);
+        // Single `{"patch": ...}` wrapper (the advertised shape).
+        let patch_wrapped = serde_json::json!({ "patch": patch }).to_string();
+        assert_eq!(unwrap_apply_patch_envelope(&patch_wrapped), patch);
+        // Single `{"input": ...}` wrapper (what the model actually emits).
+        let input_wrapped = serde_json::json!({ "input": patch }).to_string();
+        assert_eq!(unwrap_apply_patch_envelope(&input_wrapped), patch);
+        // Deeply nested mixed wrappers (the spiral) collapse to the envelope.
+        let mut nested = patch.to_string();
+        for key in ["input", "patch", "input"] {
+            nested = serde_json::json!({ key: nested }).to_string();
+        }
+        assert_eq!(unwrap_apply_patch_envelope(&nested), patch);
+        // A payload we cannot resolve to an envelope is returned as-is so the
+        // downstream parser can surface a real error to the model.
+        assert_eq!(unwrap_apply_patch_envelope("not a patch"), "not a patch");
     }
 
     #[test]
