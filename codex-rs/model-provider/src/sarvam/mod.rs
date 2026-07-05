@@ -11,6 +11,7 @@ use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::openai_models::ModelsResponse;
 
 use crate::provider::ModelProvider;
+use crate::provider::ModelProviderFuture;
 use crate::provider::ProviderAccountResult;
 use crate::provider::ProviderAccountState;
 use crate::provider::ProviderCapabilities;
@@ -32,7 +33,6 @@ impl SarvamModelProvider {
     }
 }
 
-#[async_trait::async_trait]
 impl ModelProvider for SarvamModelProvider {
     fn info(&self) -> &ModelProviderInfo {
         &self.info
@@ -51,8 +51,10 @@ impl ModelProvider for SarvamModelProvider {
         self.auth_manager.clone()
     }
 
-    async fn auth(&self) -> Option<CodexAuth> {
-        self.auth_manager.as_ref().and_then(|am| am.auth_cached())
+    fn auth(&self) -> ModelProviderFuture<'_, Option<CodexAuth>> {
+        Box::pin(async move {
+            self.auth_manager.as_ref().and_then(|am| am.auth_cached())
+        })
     }
 
     fn account_state(&self) -> ProviderAccountResult {

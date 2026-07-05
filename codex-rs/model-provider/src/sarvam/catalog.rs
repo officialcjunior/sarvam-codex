@@ -112,6 +112,8 @@ fn sarvam_model(
         context_window: Some(context_window),
         max_context_window: Some(context_window),
         auto_compact_token_limit: None,
+        comp_hash: None,
+        include_skills_usage_instructions: false,
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),
         used_fallback_model_metadata: false,
