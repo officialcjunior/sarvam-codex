@@ -174,6 +174,7 @@ pub async fn process_chat_completions_sse(
                             role: "assistant".to_string(),
                             content: vec![],
                             phase: None,
+                            internal_chat_message_metadata_passthrough: None,
                         };
                         if tx_event
                             .send(Ok(ResponseEvent::OutputItemAdded(placeholder)))
@@ -210,6 +211,7 @@ pub async fn process_chat_completions_sse(
                             role: "assistant".to_string(),
                             content: vec![],
                             phase: None,
+                            internal_chat_message_metadata_passthrough: None,
                         };
                         if tx_event
                             .send(Ok(ResponseEvent::OutputItemAdded(placeholder)))
@@ -290,6 +292,7 @@ pub async fn process_chat_completions_sse(
                 text: accumulated_text,
             }],
             phase: None,
+            internal_chat_message_metadata_passthrough: None,
         };
         // OutputItemAdded was already sent before the first delta; only send Done.
         let _ = tx_event
@@ -317,7 +320,9 @@ pub async fn process_chat_completions_sse(
                     status: None,
                     call_id: buf.id,
                     name: "apply_patch".to_string(),
+                    namespace: None,
                     input: patch,
+                    internal_chat_message_metadata_passthrough: None,
                 },
                 Err(reason) => {
                     // Surface the error to the model as a function-call result
@@ -329,6 +334,7 @@ pub async fn process_chat_completions_sse(
                         namespace: None,
                         arguments: buf.args,
                         call_id: buf.id,
+                        internal_chat_message_metadata_passthrough: None,
                     }
                 }
             }
@@ -348,6 +354,7 @@ pub async fn process_chat_completions_sse(
                     namespace: None,
                     arguments: shell_args,
                     call_id: buf.id,
+                    internal_chat_message_metadata_passthrough: None
                 },
                 Err(reason) => {
                     debug!("rejecting {} tool_call: {reason}", buf.name);
@@ -357,6 +364,7 @@ pub async fn process_chat_completions_sse(
                         namespace: None,
                         arguments: buf.args,
                         call_id: buf.id,
+                        internal_chat_message_metadata_passthrough: None,
                     }
                 }
             }
@@ -372,7 +380,9 @@ pub async fn process_chat_completions_sse(
                 status: None,
                 call_id: buf.id,
                 name: buf.name,
+                namespace: None,
                 input: patch,
+                internal_chat_message_metadata_passthrough: None,
             }
         } else {
             ResponseItem::FunctionCall {
@@ -381,6 +391,7 @@ pub async fn process_chat_completions_sse(
                 namespace: None,
                 arguments: buf.args,
                 call_id: buf.id,
+                internal_chat_message_metadata_passthrough: None,
             }
         };
         let _ = tx_event

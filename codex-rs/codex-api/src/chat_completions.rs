@@ -213,9 +213,14 @@ pub fn responses_to_chat_completions_request(
     // Chat Completions: {"type":"function","function":{"name":...,"description":...,"parameters":...}}
     let mut tools: Vec<Value> = req
         .tools
-        .iter()
-        .flat_map(rewrap_tool_for_chat_completions)
-        .collect();
+        .as_ref()
+        .map(|tools| {
+            tools
+                .iter()
+                .flat_map(rewrap_tool_for_chat_completions)
+                .collect()
+        })
+        .unwrap_or_default();
 
     // If `shell_command` is in the toolset, also advertise dedicated
     // `read_file` / `glob` / `grep` tools. These are typed wrappers that the
@@ -249,7 +254,7 @@ pub fn responses_to_chat_completions_request(
                 "low".to_string()
             }
             ReasoningEffort::Medium => "medium".to_string(),
-            ReasoningEffort::High | ReasoningEffort::XHigh => "high".to_string(),
+            ReasoningEffort::High | ReasoningEffort::XHigh | ReasoningEffort::Max | ReasoningEffort::Ultra => "high".to_string(),
             ReasoningEffort::Custom(s) => s.clone(),
         });
 
@@ -305,7 +310,7 @@ match item {
             }]),
         }),
 
-        ResponseItem::FunctionCallOutput { call_id, output } => Some(ChatMessage {
+        ResponseItem::FunctionCallOutput { call_id, output, .. } => Some(ChatMessage {
             role: "tool".to_string(),
             content: output.body.to_text().unwrap_or_default(),
             tool_call_id: Some(call_id.clone()),
@@ -348,7 +353,9 @@ match item {
         }),
 
         // All Responses-API-only item types are silently skipped.
-        ResponseItem::Reasoning { .. }
+        ResponseItem::AdditionalTools { .. }
+        | ResponseItem::AgentMessage { .. }
+        | ResponseItem::Reasoning { .. }
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::ToolSearchCall { .. }
         | ResponseItem::ToolSearchOutput { .. }
@@ -356,7 +363,7 @@ match item {
         | ResponseItem::ImageGenerationCall { .. }
         | ResponseItem::Compaction { .. }
         | ResponseItem::ContextCompaction { .. }
-        | ResponseItem::CompactionTrigger
+        | ResponseItem::CompactionTrigger {}
         | ResponseItem::Other => None,
     }
 }

@@ -63,13 +63,13 @@ impl<T: HttpTransport> ChatCompletionsClient<T> {
         options: ChatCompletionsOptions,
     ) -> Result<ResponseStream, ApiError> {
         let cc_request = responses_to_chat_completions_request(&request);
-        let body = serde_json::to_value(&cc_request).map_err(|e| {
+        let body = codex_client::EncodedJsonBody::encode(&cc_request).map_err(|e| {
             ApiError::Stream(format!("failed to encode chat completions request: {e}"))
         })?;
 
         let stream_response = self
             .session
-            .stream_with(
+            .stream_encoded_json_with(
                 Method::POST,
                 "chat/completions",
                 options.extra_headers,
