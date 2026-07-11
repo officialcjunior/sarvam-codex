@@ -410,6 +410,13 @@ impl ToolRegistry {
         let tool_name = invocation.tool_name.clone();
         let tool_name_flat = flat_tool_name(&tool_name);
         let call_id_owned = invocation.call_id.clone();
+        tracing::debug!(
+            target: "codex_core::wire",
+            tool_name = %tool_name_flat,
+            call_id = %call_id_owned,
+            payload = ?invocation.payload,
+            "tool call dispatched"
+        );
         let otel = invocation.turn.session_telemetry.clone();
         let base_tool_result_tags = [
             (
@@ -571,6 +578,27 @@ impl ToolRegistry {
             Ok((_, success)) => *success,
             Err(_) => false,
         };
+        match &result {
+            Ok((preview, success)) => {
+                tracing::debug!(
+                    target: "codex_core::wire",
+                    tool_name = %tool_name_flat,
+                    call_id = %call_id_owned,
+                    success = success,
+                    result_preview = %preview,
+                    "tool call completed"
+                );
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target: "codex_core::wire",
+                    tool_name = %tool_name_flat,
+                    call_id = %call_id_owned,
+                    error = %err,
+                    "tool call failed"
+                );
+            }
+        }
         emit_metric_for_tool_read(&invocation, success);
         let post_tool_use_payload = if success {
             let guard = response_cell.lock().await;

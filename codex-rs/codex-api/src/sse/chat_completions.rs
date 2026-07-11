@@ -27,7 +27,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio::time::timeout;
 use tracing::debug;
-use tracing::trace;
+use tracing::warn;
 
 /// Accumulated state for a single in-progress tool call.
 struct ToolCallBuffer {
@@ -119,7 +119,7 @@ pub async fn process_chat_completions_sse(
             }
         };
 
-        trace!("chat_completions SSE: {}", &sse.data);
+        debug!(target: "codex_api::wire", "chat_completions SSE: {}", &sse.data);
 
         if sse.data == "[DONE]" {
             _received_done = true;
@@ -292,6 +292,17 @@ pub async fn process_chat_completions_sse(
             }
         }
     }
+
+    debug!(
+        target: "codex_api::wire",
+        response_id = %response_id,
+        finish_reason = ?finish_reason,
+        accumulated_text_len = accumulated_text.len(),
+        tool_calls = tool_calls_buf.len(),
+        prompt_tokens = usage.as_ref().map(|u| u.prompt_tokens),
+        completion_tokens = usage.as_ref().map(|u| u.completion_tokens),
+        "chat_completions stream finished"
+    );
 
     // Emit the assembled assistant text message (if any).
     if !accumulated_text.is_empty() {

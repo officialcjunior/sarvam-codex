@@ -63,6 +63,11 @@ impl<T: HttpTransport> ChatCompletionsClient<T> {
         options: ChatCompletionsOptions,
     ) -> Result<ResponseStream, ApiError> {
         let cc_request = responses_to_chat_completions_request(&request);
+        if tracing::enabled!(target: "codex_api::wire", tracing::Level::DEBUG) {
+            let pretty = serde_json::to_string_pretty(&cc_request)
+                .unwrap_or_else(|e| format!("<failed to serialize request: {e}>"));
+            tracing::debug!(target: "codex_api::wire", "outbound chat_completions request:\n{pretty}");
+        }
         let body = codex_client::EncodedJsonBody::encode(&cc_request).map_err(|e| {
             ApiError::Stream(format!("failed to encode chat completions request: {e}"))
         })?;
