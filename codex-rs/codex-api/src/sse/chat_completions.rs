@@ -17,6 +17,7 @@ use codex_client::StreamResponse;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::TokenUsage;
+use codex_protocol::ResponseItemId;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use std::collections::BTreeMap;
@@ -29,11 +30,20 @@ use tracing::debug;
 use tracing::trace;
 
 /// Accumulated state for a single in-progress tool call.
-#[derive(Default)]
 struct ToolCallBuffer {
-    id: String,
+    id: ResponseItemId,
     name: String,
     args: String,
+}
+
+impl Default for ToolCallBuffer {
+    fn default() -> Self {
+        Self {
+            id: ResponseItemId::from_server(String::new()),
+            name: String::new(),
+            args: String::new(),
+        }
+    }
 }
 
 /// Spawn an async task that reads the Chat Completions SSE stream and sends
@@ -77,7 +87,7 @@ pub async fn process_chat_completions_sse(
     let mut usage: Option<ChunkUsage> = None;
     let mut _received_done = false;
     // ID for the synthetic assistant message item; set on first text/reasoning delta.
-    let mut text_item_id: Option<String> = None;
+    let mut text_item_id: Option<ResponseItemId> = None;
     // Index counter for reasoning content blocks (Sarvam streams reasoning_content deltas).
     let mut reasoning_content_index: i64 = 0;
 
@@ -165,9 +175,9 @@ pub async fn process_chat_completions_sse(
                     // turn.rs has an active_item when it processes deltas.
                     if text_item_id.is_none() {
                         let id = if response_id.is_empty() {
-                            "chat_completions_msg_0".to_string()
+                            ResponseItemId::from_server("chat_completions_msg_0".to_string())
                         } else {
-                            format!("{response_id}_msg_0")
+                            ResponseItemId::from_server(format!("{response_id}_msg_0"))
                         };
                         text_item_id = Some(id.clone());
                         let placeholder = ResponseItem::Message {
@@ -202,9 +212,9 @@ pub async fn process_chat_completions_sse(
                     // Ensure OutputItemAdded fires before any delta.
                     if text_item_id.is_none() {
                         let id = if response_id.is_empty() {
-                            "chat_completions_msg_0".to_string()
+                            ResponseItemId::from_server("chat_completions_msg_0".to_string())
                         } else {
-                            format!("{response_id}_msg_0")
+                            ResponseItemId::from_server(format!("{response_id}_msg_0"))
                         };
                         text_item_id = Some(id.clone());
                         let placeholder = ResponseItem::Message {
@@ -243,7 +253,7 @@ pub async fn process_chat_completions_sse(
 
                     if let Some(id) = &tc_delta.id {
                         if !id.is_empty() {
-                            buf.id = id.clone();
+                            buf.id = ResponseItemId::from_server(id.clone());
                         }
                     }
 
@@ -257,7 +267,7 @@ pub async fn process_chat_completions_sse(
                             let item_id = if buf.id.is_empty() {
                                 format!("tool_call_{}", tc_delta.index)
                             } else {
-                                buf.id.clone()
+                                buf.id.to_string()
                             };
                             if tx_event
                                 .send(Ok(ResponseEvent::ToolCallInputDelta {
@@ -319,7 +329,7 @@ pub async fn process_chat_completions_sse(
                 Ok(patch) => ResponseItem::CustomToolCall {
                     id: Some(buf.id.clone()),
                     status: None,
-                    call_id: buf.id,
+                    call_id: buf.id.to_string(),
                     name: "apply_patch".to_string(),
                     namespace: None,
                     input: patch,
@@ -334,7 +344,7 @@ pub async fn process_chat_completions_sse(
                         name: buf.name,
                         namespace: None,
                         arguments: buf.args,
-                        call_id: buf.id,
+                        call_id: buf.id.to_string(),
                         internal_chat_message_metadata_passthrough: None,
                     }
                 }
@@ -354,7 +364,7 @@ pub async fn process_chat_completions_sse(
                     name: "shell_command".to_string(),
                     namespace: None,
                     arguments: shell_args,
-                    call_id: buf.id,
+                    call_id: buf.id.to_string(),
                     internal_chat_message_metadata_passthrough: None
                 },
                 Err(reason) => {
@@ -364,7 +374,7 @@ pub async fn process_chat_completions_sse(
                         name: buf.name,
                         namespace: None,
                         arguments: buf.args,
-                        call_id: buf.id,
+                        call_id: buf.id.to_string(),
                         internal_chat_message_metadata_passthrough: None,
                     }
                 }
@@ -383,7 +393,7 @@ pub async fn process_chat_completions_sse(
             ResponseItem::CustomToolCall {
                 id: Some(buf.id.clone()),
                 status: None,
-                call_id: buf.id,
+                call_id: buf.id.to_string(),
                 name: buf.name,
                 namespace: None,
                 input: patch,
@@ -395,7 +405,7 @@ pub async fn process_chat_completions_sse(
                 name: buf.name,
                 namespace: None,
                 arguments: buf.args,
-                call_id: buf.id,
+                call_id: buf.id.to_string(),
                 internal_chat_message_metadata_passthrough: None,
             }
         };

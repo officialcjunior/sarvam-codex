@@ -1535,7 +1535,14 @@ impl ModelClientSession {
         inference_trace: &InferenceTraceContext,
     ) -> Result<ResponseStream> {
         let client_setup = self.client.current_client_setup().await?;
-        let transport = ReqwestTransport::new(build_reqwest_client());
+        let request_url = client_setup.api_provider.url_for_path("chat/completions");
+        let reqwest_client = build_default_reqwest_client_for_route(
+            &self.client.http_client_factory,
+            &request_url,
+            ClientRouteClass::Api,
+        )
+        .map_err(std::io::Error::from)?;
+        let transport = ReqwestTransport::new(reqwest_client);
         let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
             session_telemetry,
             AuthRequestTelemetryContext::new(

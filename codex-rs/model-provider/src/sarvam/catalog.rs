@@ -95,7 +95,7 @@ fn sarvam_model(
         base_instructions: SARVAM_PROMPT.to_string(),
         model_messages: None,
         // Chat Completions has no reasoning_summary field.
-        supports_reasoning_summaries: false,
+        supports_reasoning_summary_parameter: false,
         default_reasoning_summary: ReasoningSummary::None,
         // Chat Completions has no verbosity field.
         support_verbosity: false,

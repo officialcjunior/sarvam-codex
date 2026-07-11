@@ -2982,26 +2982,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-execpolicy-legacy"
-version = "0.0.2"
-dependencies = [
- "allocative",
- "anyhow",
- "clap",
- "derive_more 2.1.1",
- "env_logger",
- "log",
- "multimap",
- "path-absolutize",
- "regex-lite",
- "serde",
- "serde_json",
- "serde_with",
- "starlark",
- "tempfile",
-]
-
-[[package]]
 name = "codex-experimental-api-macros"
 version = "0.0.2"
 dependencies = [
@@ -3026,7 +3006,7 @@ dependencies = [
 
 [[package]]
 name = "codex-extension-items"
-version = "0.0.0"
+version = "0.0.2"
 dependencies = [
  "codex-utils-absolute-path",
  "pretty_assertions",
@@ -3220,7 +3200,7 @@ dependencies = [
 
 [[package]]
 name = "codex-http-client"
-version = "0.0.0"
+version = "0.0.2"
 dependencies = [
  "bytes",
  "codex-utils-cargo-bin",
@@ -4498,7 +4478,7 @@ dependencies = [
 
 [[package]]
 name = "codex-websocket-client"
-version = "0.0.0"
+version = "0.0.2"
 dependencies = [
  "codex-http-client",
  "codex-utils-rustls-provider",
