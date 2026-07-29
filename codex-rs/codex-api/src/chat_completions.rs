@@ -342,7 +342,9 @@ match item {
                     // imitated turn after turn.
                     arguments: serde_json::to_string(
                         &serde_json::json!({
-                            "patch": unwrap_apply_patch_envelope(input),
+                            "patch": repair_apply_patch_envelope(
+                                &unwrap_apply_patch_envelope(input),
+                            ),
                         }),
                     )
                     .unwrap_or_else(|_| "{}".to_string()),
@@ -567,6 +569,66 @@ pub(crate) fn unwrap_apply_patch_envelope(arguments: &str) -> String {
         }
     }
     current
+}
+
+/// Repair a common model formatting mistake in apply_patch envelopes: emitting
+/// an `*** Add File:` body as raw file content with no `+` line prefix.
+///
+/// V4A requires every added line to start with `+`. Smaller models routinely
+/// stream `*** Add File: p\n{\n  "name": ...` (the literal file contents), which
+/// core rejects with `'{' is not a valid hunk header`. Because an Add File body
+/// is unambiguous — every line is an addition — we can safely re-prefix it.
+///
+/// Scope is deliberately narrow to avoid corrupting patches we understand:
+/// - only `*** Add File:` sections are touched (Update hunks legitimately carry
+///   ` `/`-`/`@@` lines, so we never rewrite them),
+/// - and only when the section's body is *entirely* unprefixed (no body line
+///   already starts with `+`). A partially-prefixed body is ambiguous, so we
+///   leave it exactly as-is rather than risk double-prefixing real content.
+///
+/// A well-formed patch is returned unchanged.
+pub(crate) fn repair_apply_patch_envelope(patch: &str) -> String {
+    if !patch.starts_with(APPLY_PATCH_ENVELOPE_PREFIX) {
+        return patch.to_string();
+    }
+
+    let lines: Vec<&str> = patch.split('\n').collect();
+
+    // Section boundaries are lines beginning with `*** `.
+    let is_marker = |l: &str| l.starts_with("*** ");
+    // A body line already in hunk form (so the section is not raw content).
+    let is_prefixed = |l: &str| l.starts_with('+') || l.starts_with('-') || l.starts_with("@@");
+
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        out.push(line.to_string());
+        if !line.starts_with("*** Add File:") {
+            i += 1;
+            continue;
+        }
+        // Collect this Add File section's body (until the next marker / EOF).
+        let start = i + 1;
+        let mut end = start;
+        while end < lines.len() && !is_marker(lines[end]) {
+            end += 1;
+        }
+        let body = &lines[start..end];
+        // Only repair a body that is entirely raw content.
+        let needs_repair =
+            !body.is_empty() && !body.iter().any(|l| is_prefixed(l) || is_marker(l));
+        for &body_line in body {
+            if needs_repair {
+                out.push(format!("+{body_line}"));
+            } else {
+                out.push(body_line.to_string());
+            }
+        }
+        i = end;
+    }
+
+    out.join("\n")
 }
 
 /// The real `apply_patch` tool, advertised alongside `edit_file`/`write_file`
@@ -1236,6 +1298,53 @@ mod tests {
         // A payload we cannot resolve to an envelope is returned as-is so the
         // downstream parser can surface a real error to the model.
         assert_eq!(unwrap_apply_patch_envelope("not a patch"), "not a patch");
+    }
+
+    #[test]
+    fn repair_apply_patch_prefixes_raw_add_file_body() {
+        // The exact failure shape from the logs: an Add File body streamed as
+        // raw file content with no `+` prefixes.
+        let raw = "*** Begin Patch\n\
+                   *** Add File: frontend/package.json\n\
+                   {\n  \"name\": \"app\"\n}\n\
+                   *** End Patch";
+        let fixed = repair_apply_patch_envelope(raw);
+        assert_eq!(
+            fixed,
+            "*** Begin Patch\n\
+             *** Add File: frontend/package.json\n\
+             +{\n+  \"name\": \"app\"\n+}\n\
+             *** End Patch"
+        );
+    }
+
+    #[test]
+    fn repair_apply_patch_leaves_wellformed_patches_untouched() {
+        // Already-prefixed Add File body: unchanged.
+        let add = "*** Begin Patch\n\
+                   *** Add File: a.txt\n\
+                   +hello\n+world\n\
+                   *** End Patch";
+        assert_eq!(repair_apply_patch_envelope(add), add);
+        // Update hunks carry ` `/`-`/`+`/`@@` lines that must never be touched.
+        let update = "*** Begin Patch\n\
+                      *** Update File: a.txt\n\
+                      @@\n context\n-old\n+new\n\
+                      *** End Patch";
+        assert_eq!(repair_apply_patch_envelope(update), update);
+        // Non-envelope input is returned as-is.
+        assert_eq!(repair_apply_patch_envelope("garbage"), "garbage");
+    }
+
+    #[test]
+    fn repair_apply_patch_skips_partially_prefixed_body() {
+        // Ambiguous (some lines already prefixed): leave it alone rather than
+        // risk double-prefixing real content.
+        let mixed = "*** Begin Patch\n\
+                     *** Add File: a.txt\n\
+                     +one\ntwo\n\
+                     *** End Patch";
+        assert_eq!(repair_apply_patch_envelope(mixed), mixed);
     }
 
     #[test]

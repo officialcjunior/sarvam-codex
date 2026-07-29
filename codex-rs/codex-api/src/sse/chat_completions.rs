@@ -4,6 +4,7 @@ use crate::chat_completions::ChunkUsage;
 use crate::chat_completions::ChatCompletionsChunk;
 use crate::chat_completions::synth_apply_patch_from_edit_file;
 use crate::chat_completions::synth_apply_patch_from_write_file;
+use crate::chat_completions::repair_apply_patch_envelope;
 use crate::chat_completions::unwrap_apply_patch_envelope;
 use crate::chat_completions::synth_shell_command_from_glob;
 use crate::chat_completions::synth_shell_command_from_grep;
@@ -59,7 +60,7 @@ pub fn spawn_chat_completions_stream(
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
 
-    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent, ApiError>>(1600);
+    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent, ApiError>>(10000);
     tokio::spawn(process_chat_completions_sse(
         stream_response.bytes,
         tx_event,
@@ -400,7 +401,10 @@ pub async fn process_chat_completions_sse(
             // instead of a JSON object. Passing the raw args straight through
             // (the old behaviour) is what let a single stray `{"input":…}` call
             // spiral into ever-deeper nesting.
-            let patch = unwrap_apply_patch_envelope(&buf.args);
+            // Then repair a raw (unprefixed) `*** Add File:` body, another
+            // frequent model slip that core would otherwise reject with
+            // `'{' is not a valid hunk header`.
+            let patch = repair_apply_patch_envelope(&unwrap_apply_patch_envelope(&buf.args));
             ResponseItem::CustomToolCall {
                 id: Some(buf.id.clone()),
                 status: None,

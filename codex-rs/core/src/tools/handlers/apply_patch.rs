@@ -55,6 +55,28 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 
 const APPLY_PATCH_ARGUMENT_DIFF_BUFFER_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Upper bound on the detail echoed back to the model when a patch fails to
+/// verify. A failed apply_patch output is replayed in full on every subsequent
+/// request, so an over-long error (e.g. a `Failed to find expected lines` body
+/// that quotes a large hunk) permanently inflates the context window for the
+/// rest of the session. The head keeps the actionable part (which file / which
+/// lines); the tail is dropped.
+const APPLY_PATCH_ERROR_MAX_LEN: usize = 600;
+
+/// Format an apply_patch verification failure, capping the detail length so a
+/// one-off formatting slip cannot balloon the conversation history.
+fn format_verification_failure(parse_error: impl std::fmt::Display) -> String {
+    let detail = parse_error.to_string();
+    let capped = if detail.chars().count() > APPLY_PATCH_ERROR_MAX_LEN {
+        let head: String = detail.chars().take(APPLY_PATCH_ERROR_MAX_LEN).collect();
+        format!("{head}… (truncated)")
+    } else {
+        detail
+    };
+    format!("apply_patch verification failed: {capped}")
+}
+
 /// Handles freeform `apply_patch` requests and routes verified patches to the
 /// selected environment filesystem.
 #[derive(Default)]
@@ -364,8 +386,8 @@ impl ApplyPatchHandler {
         let args = match codex_apply_patch::parse_patch(&patch_input) {
             Ok(args) => args,
             Err(parse_error) => {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "apply_patch verification failed: {parse_error}"
+                return Err(FunctionCallError::RespondToModel(format_verification_failure(
+                    parse_error,
                 )));
             }
         };
@@ -474,8 +496,8 @@ impl ApplyPatchHandler {
                 }
             }
             codex_apply_patch::MaybeApplyPatchVerified::CorrectnessError(parse_error) => {
-                Err(FunctionCallError::RespondToModel(format!(
-                    "apply_patch verification failed: {parse_error}"
+                Err(FunctionCallError::RespondToModel(format_verification_failure(
+                    parse_error,
                 )))
             }
             codex_apply_patch::MaybeApplyPatchVerified::ShellParseError(error) => {
@@ -637,8 +659,8 @@ pub(crate) async fn intercept_apply_patch(
             }
         }
         codex_apply_patch::MaybeApplyPatchVerified::CorrectnessError(parse_error) => {
-            Err(FunctionCallError::RespondToModel(format!(
-                "apply_patch verification failed: {parse_error}"
+            Err(FunctionCallError::RespondToModel(format_verification_failure(
+                parse_error,
             )))
         }
         codex_apply_patch::MaybeApplyPatchVerified::ShellParseError(error) => {

@@ -140,6 +140,132 @@ use tracing::warn;
 /// - If the model sends only an assistant message, we record it in the
 ///   conversation history and consider the turn complete.
 ///
+/// After the model repeats an identical failing tool call this many times in a
+/// row, inject a corrective reminder steering it to change approach.
+const STUCK_TOOL_LOOP_NUDGE_THRESHOLD: usize = 3;
+
+/// After this many identical consecutive failures, abort the turn outright
+/// rather than keep spending tokens on a call that cannot succeed.
+const STUCK_TOOL_LOOP_ABORT_THRESHOLD: usize = 8;
+
+/// Cap on how many characters of the repeated tool error are echoed back into
+/// the corrective reminder / abort message.
+const STUCK_TOOL_LOOP_ERROR_PREVIEW_LEN: usize = 500;
+
+/// A run of identical, consecutively-failing tool calls at the tail of history.
+struct StuckToolLoop {
+    tool_name: String,
+    error: String,
+    count: usize,
+}
+
+/// Detect a model stuck re-issuing the exact same tool call after it keeps
+/// failing.
+///
+/// Pairs each tool call with its output by `call_id`, then counts the trailing
+/// run of identical `(name, arguments)` calls whose output reported failure
+/// (`success == Some(false)`, set by `ToolCallRuntime::failure_response`).
+/// Interleaved reasoning / assistant messages are ignored, so a "reason, then
+/// re-issue the identical call" pattern is still caught. Returns `None` unless
+/// the most recent tool interaction is itself a failure (a later success breaks
+/// the loop).
+fn detect_stuck_tool_loop(history: &[ResponseItem]) -> Option<StuckToolLoop> {
+    use std::collections::HashMap;
+
+    // call_id -> (succeeded, error_text)
+    let mut outputs: HashMap<&str, (bool, String)> = HashMap::new();
+    for item in history {
+        let (call_id, output) = match item {
+            ResponseItem::FunctionCallOutput { call_id, output, .. }
+            | ResponseItem::CustomToolCallOutput { call_id, output, .. } => (call_id, output),
+            _ => continue,
+        };
+        let succeeded = output.success.unwrap_or(true);
+        outputs.insert(
+            call_id.as_str(),
+            (succeeded, output.body.to_text().unwrap_or_default()),
+        );
+    }
+
+    // Ordered `(name, args, succeeded, error)` for calls that have an output.
+    let mut interactions: Vec<(&str, &str, bool, &str)> = Vec::new();
+    for item in history {
+        let (name, args, call_id) = match item {
+            ResponseItem::FunctionCall {
+                name,
+                arguments,
+                call_id,
+                ..
+            } => (name.as_str(), arguments.as_str(), call_id.as_str()),
+            ResponseItem::CustomToolCall {
+                name,
+                input,
+                call_id,
+                ..
+            } => (name.as_str(), input.as_str(), call_id.as_str()),
+            _ => continue,
+        };
+        if let Some((succeeded, error)) = outputs.get(call_id) {
+            interactions.push((name, args, *succeeded, error.as_str()));
+        }
+    }
+
+    let (last_name, last_args, last_succeeded, last_error) = *interactions.last()?;
+    if last_succeeded {
+        return None;
+    }
+    let mut count = 0usize;
+    for &(name, args, succeeded, _) in interactions.iter().rev() {
+        if !succeeded && name == last_name && args == last_args {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+
+    let trimmed = last_error.trim();
+    let error = if trimmed.chars().count() > STUCK_TOOL_LOOP_ERROR_PREVIEW_LEN {
+        let mut preview: String = trimmed.chars().take(STUCK_TOOL_LOOP_ERROR_PREVIEW_LEN).collect();
+        preview.push('…');
+        preview
+    } else {
+        trimmed.to_string()
+    };
+
+    Some(StuckToolLoop {
+        tool_name: last_name.to_string(),
+        error,
+        count,
+    })
+}
+
+/// A `developer`-role reminder nudging the model out of an identical-failing
+/// tool-call loop (see `detect_stuck_tool_loop`).
+fn stuck_tool_loop_reminder(stuck: &StuckToolLoop) -> ResponseItem {
+    let mut text = format!(
+        "STOP: you have called the `{}` tool with identical arguments {} times in a row and it \
+         has failed every time with the same error:\n\n{}\n\nResubmitting the same call will keep \
+         failing.",
+        stuck.tool_name, stuck.count, stuck.error
+    );
+    if stuck.tool_name == "apply_patch" {
+        text.push_str(
+            " The file's real contents differ from your patch's context / `-` lines. Call \
+             `read_file` on the target file to see what it actually contains, then rebuild your \
+             edit from the real text (or use `edit_file`).",
+        );
+    } else {
+        text.push_str(" Re-examine the inputs and take a materially different approach.");
+    }
+    ResponseItem::Message {
+        id: None,
+        role: "developer".to_string(),
+        content: vec![ContentItem::InputText { text }],
+        phase: None,
+        internal_chat_message_metadata_passthrough: None,
+    }
+}
+
 pub(crate) async fn run_turn(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -250,6 +376,7 @@ pub(crate) async fn run_turn(
             Some(step_context) => step_context,
             None => sess.capture_step_context(Arc::clone(&turn_context)).await,
         };
+        let mut stuck_abort: Option<StuckToolLoop> = None;
         let sampling_request_result: CodexResult<_> = async {
             super::time_reminder::maybe_record_current_time_reminder(
                 sess.as_ref(),
@@ -269,13 +396,32 @@ pub(crate) async fn run_turn(
             }
 
             // Construct the input that we will send to the model.
-            let sampling_request_input: Vec<ResponseItem> = async {
+            let mut sampling_request_input: Vec<ResponseItem> = async {
                 sess.clone_history()
                     .await
                     .for_prompt(&turn_context.model_info.input_modalities)
             }
             .instrument(trace_span!("run_turn.prepare_sampling_request_input"))
             .await;
+
+            // Break a model stuck re-issuing the same failing tool call: nudge
+            // it toward a different approach first, then abort the turn if it
+            // keeps going, rather than burning tokens on a call that provably
+            // cannot succeed.
+            if let Some(stuck) = detect_stuck_tool_loop(&sampling_request_input) {
+                if stuck.count >= STUCK_TOOL_LOOP_ABORT_THRESHOLD {
+                    stuck_abort = Some(stuck);
+                    return Ok((
+                        SamplingRequestResult {
+                            needs_follow_up: false,
+                            last_agent_message: None,
+                        },
+                        Vec::new(),
+                    ));
+                } else if stuck.count >= STUCK_TOOL_LOOP_NUDGE_THRESHOLD {
+                    sampling_request_input.push(stuck_tool_loop_reminder(&stuck));
+                }
+            }
 
             let responses_metadata = turn_context.turn_metadata_state.to_responses_metadata(
                 sess.installation_id.clone(),
@@ -295,6 +441,27 @@ pub(crate) async fn run_turn(
             .await
         }
         .await;
+        if let Some(stuck) = stuck_abort.take() {
+            let message = format!(
+                "Turn aborted: the model called `{}` with identical arguments {} times in a row \
+                 and it failed every time. Last error: {}. Stopping to avoid an infinite loop — \
+                 the target likely differs from what the model assumed.",
+                stuck.tool_name, stuck.count, stuck.error
+            );
+            warn!("{message}");
+            let error = CodexErrorInfo::Other;
+            sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
+                .await;
+            sess.send_event(
+                &turn_context,
+                EventMsg::Error(ErrorEvent {
+                    message,
+                    codex_error_info: Some(error),
+                }),
+            )
+            .await;
+            break;
+        }
         match sampling_request_result {
             Ok((sampling_request_output, sampling_request_input)) => {
                 let SamplingRequestResult {

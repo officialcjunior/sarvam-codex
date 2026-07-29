@@ -19,9 +19,7 @@ You have access to function tools provided alongside this prompt via the API's s
 
 - Do NOT write tool invocations as XML tags such as `<function-calls>`, `<invoke>`, `<tool>`, or similar.
 - Do NOT write tool invocations as inline JSON text inside your assistant `content` (e.g. printing `{"name":"shell_command","arguments":...}` in the message body).
-- Do NOT invoke `apply_patch` or `shell {"command":["apply_patch",...]}`. To edit files, use the `edit_file` and `write_file` function tools described below.
 - Do NOT invent tools that are not in the `tools` array. If a capability is not listed, you do not have it.
-
 
 ## Repetition and loop prevention
 - Monitor your own previous outputs in this conversation.
